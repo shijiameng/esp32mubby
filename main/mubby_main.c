@@ -134,6 +134,7 @@ static esp_err_t msg_parser(char *msg)
 		} else {
 			s_continue_chat = false;
 		}
+		send(s_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0);
 		push_state(MUBBY_STATE_PLAYING);
 	} else if (!strcmp(header->valuestring, "control")) {
 		cJSON *sub = cJSON_GetObjectItem(root, "sub");
@@ -282,10 +283,13 @@ static void vRecorderTask(void *pvParameters)
 		
 		xEventGroupWaitBits(s_recorder_event_group, RECORDER_STOP, pdTRUE, pdTRUE, portMAX_DELAY);
 		
-		if (send(s_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0) < 0) {
-			ESP_LOGE(TAG, "Failed to send 'end' to server");
-			next_state = MUBBY_STATE_RESET;
-		}
+		//ESP_LOGI(TAG, "Sending 'end' string");
+		//int ret;
+		//if ((ret = send(s_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0)) != 3) {
+			//ESP_LOGE(TAG, "Failed to send 'end' to server");
+			//next_state = MUBBY_STATE_RESET;
+		//}
+		//ESP_LOGE(TAG, "ret=%d", ret);
 		
 		audio_element_terminate(i2s_stream_reader);
 		audio_element_terminate(filter);
@@ -296,7 +300,7 @@ errout:
 		
 		rb_destroy(ringbuf);
 
-		push_state(next_state);
+		//push_state(next_state);
 		
 		ESP_LOGI(TAG, "----- Recording stopped ----");
 	}
@@ -371,17 +375,13 @@ static void vPlayerTask(void *pvParameters)
 				continue;
 			}
 			
-			if (queue_set_member == i2s_queue) {
-				continue;
-			}
-			
-			if (queue_set_member == i2s_queue && msg.cmd != AEL_MSG_CMD_REPORT_STATUS
-				&& (int)msg.data == AEL_STATUS_ERROR_PROCESS) {
+			if ((queue_set_member == i2s_queue || queue_set_member == mp3_queue) && 
+				(int)msg.data == AEL_STATUS_STATE_STOPPED) {
 				break;
 			}
 			
-			if (mp3_decoder == i2s_queue && msg.cmd != AEL_MSG_CMD_REPORT_STATUS
-				&& (int)msg.data == AEL_STATUS_OUTPUT_DONE) {
+			if ((queue_set_member == i2s_queue || queue_set_member == mp3_queue) && 
+				(int)msg.data == AEL_STATUS_ERROR_PROCESS) {
 				break;
 			}
 		}
@@ -508,6 +508,7 @@ static void vMainTask(void *pvParameters)
 			
 		case MUBBY_STATE_RECORDING_FINISHED:
 			ESP_LOGI(TAG, "MUBBY_STATE_RECORDING_FINISHED");
+			push_state(MUBBY_STATE_PLAYING);
 			break;
 			
 		case MUBBY_STATE_PLAYING:
@@ -666,6 +667,7 @@ void app_main(void)
 			
 		case MUBBY_STATE_RECORDING_FINISHED:
 			ESP_LOGI(TAG, "MUBBY_STATE_RECORDING_FINISHED");
+			push_state(MUBBY_STATE_PLAYING);
 			break;
 			
 		case MUBBY_STATE_PLAYING:
