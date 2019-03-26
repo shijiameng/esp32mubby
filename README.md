@@ -1,2 +1,2 @@
-# esp32mubby
-MUBBY firmware source code for ESP32 platform
+# Mubby
+MUBBY firmware for Espressif ESP32 platform
