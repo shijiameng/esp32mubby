@@ -156,6 +156,27 @@ esp_err_t wifi_manager_save_sta_config()
 	return ESP_OK;
 }
 
+esp_err_t wifi_manager_remove_sta_config()
+{
+	nvs_handle handle;
+	esp_err_t esp_err;
+	ESP_LOGD(TAG, "About to remove config from flash");
+	
+	esp_err = nvs_open(wifi_manager_nvs_namespace, NVS_READWRITE, &handle);
+	if (esp_err != ESP_OK) return esp_err;
+	
+	esp_err = nvs_erase_all(handle);
+	if (esp_err != ESP_OK) return esp_err;
+	
+	esp_err = nvs_commit(handle);
+	if (esp_err != ESP_OK) return esp_err;
+	
+	nvs_close(handle);
+	
+	return ESP_OK;
+}
+	
+
 bool wifi_manager_fetch_wifi_sta_config()
 {
 	nvs_handle handle;
@@ -673,6 +694,9 @@ void wifi_manager( void * pvParameters )
 
 						/* otherwise: reset the config */
 						memset(wifi_manager_config_sta, 0x00, sizeof(wifi_config_t));
+						
+						/* remove wifi config from NVS */
+						wifi_manager_remove_sta_config();
 					}
 					wifi_manager_unlock_json_buffer();
 				} else {

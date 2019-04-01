@@ -201,6 +201,11 @@ char* wifi_manager_get_ip_info_json();
 esp_err_t wifi_manager_save_sta_config();
 
 /**
+ * @brief removes the current STA wifi config from flash ram storage.
+ */
+esp_err_t wifi_manager_remove_sta_config();
+
+/**
  * @brief fetch a previously STA wifi config in the flash ram storage.
  * @return true if a previously saved config was found, false otherwise.
  */
