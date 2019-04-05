@@ -59,6 +59,8 @@ function to process requests, decode URLs, serve files, etc. etc.
 #include "http_server.h"
 #include "wifi_manager.h"
 
+#define HTTP_SERVER_STACK_SIZE		4096
+#define HTTP_SERVER_TASK_PRIORITY 	tskIDLE_PRIORITY	
 
 EventGroupHandle_t http_server_event_group = NULL;
 EventBits_t uxBits;
@@ -263,4 +265,14 @@ void http_server_netconn_serve(struct netconn *conn) {
 
 	/* free the buffer */
 	netbuf_delete(inbuf);
+}
+
+esp_err_t http_server_start(void)
+{
+	if (xTaskCreate(http_server, "http_server", HTTP_SERVER_STACK_SIZE, NULL, HTTP_SERVER_TASK_PRIORITY, NULL) != pdPASS) {
+		ESP_LOGE(TAG, "Failed to start http server");
+		return ESP_FAIL;
+	}
+	
+	return ESP_OK;
 }

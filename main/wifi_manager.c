@@ -53,6 +53,11 @@ Contains the freeRTOS task and all necessary support
 #include "wifi_manager.h"
 #include "dns_server.h"
 
+#include "mubby.h"
+
+#define WIFI_MANAGER_STACK_SIZE		4096
+#define WIFI_MANAGER_TASK_PRIORITY 	tskIDLE_PRIORITY	
+
 SemaphoreHandle_t wifi_manager_json_mutex = NULL;
 uint16_t ap_num = MAX_AP_NUM;
 wifi_ap_record_t *accessp_records;
@@ -101,6 +106,18 @@ const int WIFI_MANAGER_REQUEST_WIFI_SCAN = BIT5;
 
 /* @brief When set, means a client requested to disconnect from currently connected AP. */
 const int WIFI_MANAGER_REQUEST_WIFI_DISCONNECT = BIT6;
+
+static audio_event_iface_handle_t wifimgr_event_iface = NULL;
+
+static esp_err_t wifi_manager_notify_sync(int state)
+{
+	audio_event_iface_msg_t msg = {0};
+	
+	msg.source_type = MUBBY_ID_WIFIMGR;
+	msg.data = (void *)state;
+	
+	return audio_event_iface_sendout(wifimgr_event_iface, &msg);
+}
 
 void wifi_manager_scan_async()
 {
@@ -687,6 +704,9 @@ void wifi_manager( void * pvParameters )
 
 						/* save wifi config in NVS */
 						wifi_manager_save_sta_config();
+						
+						/* notify mubby */
+						wifi_manager_notify_sync(WIFI_MANAGER_STATE_CONNECTED);
 					} else {
 
 						/* failed attempt to connect regardles of the reason */
@@ -697,6 +717,9 @@ void wifi_manager( void * pvParameters )
 						
 						/* remove wifi config from NVS */
 						wifi_manager_remove_sta_config();
+						
+						/* notify mubby */
+						wifi_manager_notify_sync(WIFI_MANAGER_STATE_DISCONNECTED);
 					}
 					wifi_manager_unlock_json_buffer();
 				} else {
@@ -735,3 +758,19 @@ void wifi_manager( void * pvParameters )
 	
 	vTaskDelay( (TickType_t)10);
 } /*void wifi_manager*/
+
+
+esp_err_t wifi_manager_start(audio_event_iface_handle_t event_listener)
+{
+	audio_event_iface_cfg_t cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+	wifimgr_event_iface = audio_event_iface_init(&cfg);
+	
+	ESP_ERROR_CHECK(audio_event_iface_set_listener(wifimgr_event_iface, event_listener));
+	
+	if (xTaskCreate(wifi_manager, "wifi_manager", WIFI_MANAGER_STACK_SIZE, NULL, WIFI_MANAGER_TASK_PRIORITY, NULL) != pdPASS) {
+		ESP_LOGE(TAG, "Failed to start wifi manager");
+		return ESP_FAIL;
+	}
+	
+	return ESP_OK;
+}

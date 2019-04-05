@@ -34,6 +34,10 @@ function to process requests, decode URLs, serve files, etc. etc.
 #ifndef HTTP_SERVER_H_INCLUDED
 #define HTTP_SERVER_H_INCLUDED
 
+#include "lwip/api.h"
+#include "lwip/dns.h"
+#include "lwip/netdb.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -57,6 +61,8 @@ void http_server_set_event_start();
  * @return pointer to the beginning of the header value.
  */
 char* http_server_get_header(char *request, char *header_name, int *len);
+
+esp_err_t http_server_start(void);
 
 #ifdef __cplusplus
 }
