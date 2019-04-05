@@ -98,12 +98,12 @@ static void player_task(void *pvParameters)
 	
 	for (;;) {
 		audio_event_iface_msg_t msg;
-        esp_err_t ret = audio_event_iface_listen(s_player_event_iface, &msg, portMAX_DELAY);
+		esp_err_t ret = audio_event_iface_listen(s_player_event_iface, &msg, portMAX_DELAY);
         
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
-            continue;
-        }
+		if (ret != ESP_OK) {
+			ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
+			continue;
+		}
         
 		if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *)mp3_decoder
 			&& msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
@@ -121,12 +121,12 @@ static void player_task(void *pvParameters)
 		}
 		
 		if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) i2s_stream_writer
-            && msg.cmd == AEL_MSG_CMD_REPORT_STATUS && (int) msg.data == AEL_STATUS_STATE_STOPPED) {
-            ESP_LOGW(TAG, "[ * ] Stop event received");
-            break;
-        }
+			&& msg.cmd == AEL_MSG_CMD_REPORT_STATUS && (int) msg.data == AEL_STATUS_STATE_STOPPED) {
+			ESP_LOGW(TAG, "[ * ] Stop event received");
+			break;
+		}
         
-        if (msg.source_type == MUBBY_ID_CORE) {
+		if (msg.source_type == MUBBY_ID_CORE) {
 			printf("stopping...\n");
 			if (!strncmp((char *)msg.data, "stop", 4)) {
 				ESP_LOGW(TAG, "[ * ] Interrupted externally");
