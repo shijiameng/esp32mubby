@@ -24,7 +24,8 @@
  
 #ifndef _PLAYER_H_
 #define _PLAYER_H_
- 
+
+#include "streamer.h"
 #include "audio_event_iface.h"
 
 #ifdef __cplusplus
@@ -37,6 +38,7 @@ esp_err_t player_start(void);
 esp_err_t player_stop(void);
 
 audio_event_iface_handle_t player_get_event_iface(void);
+void player_set_streamer(streamer_handle_t s);
 
 #ifdef __cplusplus
 }

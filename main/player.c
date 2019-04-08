@@ -42,6 +42,7 @@
 #include "board.h"
 
 #include "mubby.h"
+#include "streamer.h"
 #include "player.h"
  
 static const char *TAG = "PLAYER";
@@ -57,10 +58,12 @@ static const char *TAG = "PLAYER";
 #define PLAYER_STOP_BIT			BIT4
 
 static TaskHandle_t xPlayerTask = NULL;
-static audio_event_iface_handle_t s_player_event_iface = NULL;
+static audio_event_iface_handle_t s_ext_evt_iface = NULL;
+static audio_event_iface_handle_t s_int_evt_iface = NULL;
 static audio_element_handle_t i2s_stream_writer = NULL;
 static audio_element_handle_t mp3_decoder = NULL;
 static audio_pipeline_handle_t pipeline;
+static bool is_running = false;
 
 extern int g_server_sockfd;
 extern audio_board_handle_t g_board_handle;
@@ -72,14 +75,13 @@ static esp_err_t player_notify_sync(int state)
 	msg.source_type = MUBBY_ID_PLAYER;
 	msg.data = (void *)state;
 	
-	return audio_event_iface_sendout(s_player_event_iface, &msg);
+	return audio_event_iface_sendout(s_ext_evt_iface, &msg);
 }
 
 static int player_read_cb(audio_element_handle_t el, char *buf, int len, TickType_t wait_time, void *ctx)
 {
 	int read_len = recv(g_server_sockfd, buf, len, 0);
 	if (read_len == 0 || (read_len == -1 && errno == EAGAIN)) {
-		printf("read_len=%d\n", read_len);
 		read_len = AEL_IO_DONE;
 	}
 
@@ -88,17 +90,19 @@ static int player_read_cb(audio_element_handle_t el, char *buf, int len, TickTyp
 
 static void player_task(void *pvParameters)
 {
-	//audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-	//audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
+	audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+	audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
 	
-	audio_pipeline_set_listener(pipeline, s_player_event_iface);
+	audio_event_iface_set_listener(s_int_evt_iface, evt);
+	audio_pipeline_set_listener(pipeline, evt);
 	audio_pipeline_run(pipeline);
 	
 	player_notify_sync(PLAYER_STATE_STARTED);
+	is_running = true;
 	
 	for (;;) {
 		audio_event_iface_msg_t msg;
-		esp_err_t ret = audio_event_iface_listen(s_player_event_iface, &msg, portMAX_DELAY);
+		esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
         
 		if (ret != ESP_OK) {
 			ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
@@ -135,9 +139,12 @@ static void player_task(void *pvParameters)
 		}
 	}
 	
+	is_running = false;
+	
 	audio_pipeline_terminate(pipeline);
+	audio_event_iface_remove_listener(evt, s_int_evt_iface);
 	audio_pipeline_remove_listener(pipeline);
-	//audio_event_iface_destroy(evt);
+	audio_event_iface_destroy(evt);
 	
 	player_notify_sync(PLAYER_STATE_FINISHED);
 	
@@ -147,12 +154,11 @@ static void player_task(void *pvParameters)
 esp_err_t player_create(void)
 {
 	audio_event_iface_cfg_t cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-	s_player_event_iface = audio_event_iface_init(&cfg);
+	s_ext_evt_iface = audio_event_iface_init(&cfg);
+	mem_assert(s_ext_evt_iface);
 	
-	if (!s_player_event_iface) {
-		ESP_LOGE(TAG, "Failed to create event interface");
-		return ESP_FAIL;
-	}
+	s_int_evt_iface = audio_event_iface_init(&cfg);
+	mem_assert(s_int_evt_iface);
 	
 	ESP_LOGI(TAG, "[ 1 ] Create i2s stream to write data to codec chip");
 	i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
@@ -175,6 +181,8 @@ esp_err_t player_create(void)
 	audio_pipeline_register(pipeline, i2s_stream_writer, "i2s");
 	audio_pipeline_link(pipeline, (const char *[]){"mp3", "i2s"}, 2);
 	
+	is_running = false;
+	
 	return ESP_OK;
 }
 
@@ -195,17 +203,24 @@ esp_err_t player_start(void)
 
 esp_err_t player_stop(void)
 {
-	audio_event_iface_msg_t msg = {
-		.source_type = MUBBY_ID_CORE,
-		.data = (void *)"stop"
-	};
-	
-	ESP_ERROR_CHECK(audio_event_iface_cmd(s_player_event_iface, &msg));
+	if (is_running) {
+		audio_event_iface_msg_t msg = {
+			.source_type = MUBBY_ID_CORE,
+			.data = (void *)"stop"
+		};
+		
+		return audio_event_iface_sendout(s_int_evt_iface, &msg);
+	}
 	
 	return ESP_OK;
 }
 
 audio_event_iface_handle_t player_get_event_iface(void)
 {
-	return s_player_event_iface;
+	return s_ext_evt_iface;
+}
+
+void player_set_streamer(streamer_handle_t s)
+{
+	audio_element_setdata(mp3_decoder, (void *)s);
 }

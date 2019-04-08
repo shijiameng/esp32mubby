@@ -46,6 +46,8 @@
 #include "player.h"
 #include "recorder.h"
 
+#include <openssl/ssl.h>
+
 typedef enum {
 	MUBBY_STATE_RESET = -1,
 	MUBBY_STATE_STANDBY = 0,
@@ -65,6 +67,8 @@ static esp_mqtt_client_handle_t s_mqtt_client;
 
 static bool s_continue_chat = false;
 static mubby_state_t s_mubby_state;
+
+static int s_player_volume = -1;
 
 audio_board_handle_t g_board_handle = NULL;
 int g_server_sockfd = -1;
@@ -120,7 +124,22 @@ static esp_err_t msg_parser(char *msg)
 		}
 		
 		if (!strcmp(part->valuestring, "volume")) {
-			// TODO: adjust volume
+			if (!strcmp(act->valuestring, "up")) {
+				s_player_volume += 10;
+				if (s_player_volume > 100) {
+					s_player_volume = 100;
+				}
+			} else if (!strcmp(act->valuestring, "down")) {
+				s_player_volume -= 10;
+				if (s_player_volume < 0) {
+					s_player_volume = 0;
+				}
+			} else {
+				ESP_LOGE(TAG, "Invalid action '%s'", act->valuestring);
+				ret = ESP_ERR_INVALID_ARG;
+				goto errout;
+			}
+			audio_hal_set_volume(g_board_handle->audio_hal, s_player_volume);			
 		} else if (!strcmp(part->valuestring, "stt")) {
 			if (!strcmp(act->valuestring, "end")) {
 				ESP_ERROR_CHECK(recorder_stop());
@@ -271,6 +290,10 @@ static void event_monitor_task(void *pvParameters)
 					if (s_mubby_state == MUBBY_STATE_PLAYING) {
 						printf("stopping player\n");
 						ESP_ERROR_CHECK(player_stop());
+					} else if (s_mubby_state == MUBBY_STATE_RECORDING) {
+						printf("stopping recorder\n");
+						ESP_ERROR_CHECK(recorder_stop());
+						send(g_server_sockfd, (char []){'b', 'r', 'k'}, 3, 0);
 					}
 				}
 			}
@@ -370,7 +393,6 @@ static void core_task(void *pvParameters)
 
 void app_main(void)
 {
-	
 	BaseType_t xReturned; 
     
     esp_err_t err = nvs_flash_init();
@@ -387,6 +409,9 @@ void app_main(void)
     
     g_board_handle = audio_board_init();
     audio_hal_ctrl_codec(g_board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
+    audio_hal_get_volume(g_board_handle->audio_hal, &s_player_volume);
+    
+    ESP_LOGI(TAG, "Volume: %d", s_player_volume);
     
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
 	audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);

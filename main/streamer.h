@@ -22,26 +22,37 @@
  * SOFTWARE.
  */
 
-#ifndef _RECORDER_H_
-#define _RECORDER_H_
+#ifndef _STREAMER_H_
+#define _STREAMER_H_
 
-#include "audio_event_iface.h"
+#include "lwip/sockets.h"
+#include "lwip/err.h"
+#include <openssl/ssl.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-esp_err_t recorder_create(void);
-esp_err_t recorder_destroy(void);
-esp_err_t recorder_start(void);
-esp_err_t recorder_stop(void);
+struct _streamer;
+typedef struct _streamer *streamer_handle_t;
 
-audio_event_iface_handle_t recorder_get_event_iface(void);
-void recorder_set_streamer(streamer_handle_t s);
+struct _streamer {
+	int sock;
+	SSL_CTX *ctx;
+    SSL *ssl;
+    bool is_open;
+    bool (*open)(streamer_handle_t s, char *hostname, int port);
+    bool (*close)(streamer_handle_t s);
+    int (*read)(streamer_handle_t s, char *buffer, int bufsz);
+    int (*write)(streamer_handle_t s, char *buffer, int bufsz); 
+};
 
+streamer_handle_t streamer_create(void);
+void streamer_destroy(streamer_handle_t);
+void streamer_set_timeout(streamer_handle_t, struct timeval *timeout);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _RECORDER_H_ */
+#endif /* _STREAMER_H_ */

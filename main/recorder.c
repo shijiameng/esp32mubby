@@ -38,6 +38,7 @@
 #include "i2s_stream.h"
 #include "board.h"
 
+#include "streamer.h"
 #include "mubby.h"
 #include "recorder.h"
 
@@ -54,11 +55,13 @@
 static const char *TAG = "RECORDER";
 
 static TaskHandle_t xRecorderTask = NULL;
-static audio_event_iface_handle_t s_recorder_event_iface = NULL;
+static audio_event_iface_handle_t s_ext_evt_iface = NULL;
+static audio_event_iface_handle_t s_int_evt_iface = NULL;
 static audio_element_handle_t i2s_stream_reader = NULL;
 static QueueHandle_t i2s_queue = NULL;
 static QueueHandle_t recorder_queue = NULL;
 static QueueSetHandle_t queue_set = NULL;
+static bool is_running = false;
 
 extern int g_server_sockfd;
 extern audio_board_handle_t g_board_handle;
@@ -66,7 +69,6 @@ extern audio_board_handle_t g_board_handle;
 static int recorder_write_cb(audio_element_handle_t el, char *buf, int len, TickType_t wait_time, void *ctx)
 {
 	int write_len = send(g_server_sockfd, buf, len, 0);
-	printf("write_len=%d\n", write_len);
 	return write_len;
 }
 
@@ -77,35 +79,45 @@ static esp_err_t recorder_notify_sync(int state)
 	msg.source_type = MUBBY_ID_RECORDER;
 	msg.data = (void *)state;
 	
-	return audio_event_iface_sendout(s_recorder_event_iface, &msg);
+	return audio_event_iface_sendout(s_ext_evt_iface, &msg);
 }
 
 static void recorder_task(void *pvParameters)
 {
-	/**
-	 * Struct:
-	 * i2s_stream_reader -> ringbuf1 -> filter
-	 */
-	QueueSetMemberHandle_t queue_set_member = NULL;
-	audio_event_iface_msg_t msg;
+	audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+	audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
+	
+	audio_event_iface_set_listener(s_int_evt_iface, evt);
     
 	audio_element_run(i2s_stream_reader);
 	audio_element_resume(i2s_stream_reader, 0, 0);
 	
+	is_running = true;
 	recorder_notify_sync(RECORDER_STATE_STARTED);
 	
-	while ((queue_set_member = xQueueSelectFromSet(queue_set, portMAX_DELAY))) {
-		xQueueReceive(queue_set_member, &msg, portMAX_DELAY);
+	for (;;) {
+		audio_event_iface_msg_t msg = {0};
 		
-		if (queue_set_member == recorder_queue) {
-			if (!strncmp((char *)msg.data, "stop", strlen((char *)msg.data))) {
+		esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
+		if (ret != ESP_OK) {
+			ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
+			continue;
+		}
+		
+		if (msg.source_type == MUBBY_ID_CORE) {
+			if (!strncmp((char *)msg.data, "stop", 4)) {
+				ESP_LOGW(TAG, "[ * ] Interrupted externally");
 				break;
 			}
 		}
 	}
 	
-	audio_element_terminate(i2s_stream_reader);
+	is_running = false;
 	
+	audio_event_iface_remove_listener(evt, s_int_evt_iface);
+	audio_element_terminate(i2s_stream_reader);
+	audio_event_iface_destroy(evt);
+
 	recorder_notify_sync(RECORDER_STATE_FINISHED);
 	
 	vTaskDelete(NULL);
@@ -114,11 +126,11 @@ static void recorder_task(void *pvParameters)
 esp_err_t recorder_create(void)
 {
 	audio_event_iface_cfg_t cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-	s_recorder_event_iface = audio_event_iface_init(&cfg);
-	if (!s_recorder_event_iface) {
-		ESP_LOGE(TAG, "Failed to create event interface");
-		return ESP_FAIL;
-	}
+	s_ext_evt_iface = audio_event_iface_init(&cfg);
+	mem_assert(s_ext_evt_iface);
+	
+	s_int_evt_iface = audio_event_iface_init(&cfg);
+	mem_assert(s_int_evt_iface);
 	
 	ESP_LOGI(TAG, "[ 1 ] Create i2s stream to read audio data from codec chip");
 		
@@ -136,6 +148,8 @@ esp_err_t recorder_create(void)
 	queue_set = xQueueCreateSet(10);
 	xQueueAddToSet(i2s_queue, queue_set);
 	xQueueAddToSet(recorder_queue, queue_set);
+	
+	is_running = false;
 	
 	return ESP_OK;
 }
@@ -157,13 +171,24 @@ esp_err_t recorder_start(void)
 
 esp_err_t recorder_stop(void)
 {
-	audio_event_iface_msg_t msg = {0};
-	msg.data = (void *)"stop";
-	xQueueSend(recorder_queue, &msg, portMAX_DELAY);
+	if (is_running) {
+		audio_event_iface_msg_t msg = {
+			.source_type = MUBBY_ID_CORE,
+			.data = (void *)"stop"
+		};
+		
+		return audio_event_iface_sendout(s_int_evt_iface, &msg);
+	}
+	
 	return ESP_OK;
 }
 
 audio_event_iface_handle_t recorder_get_event_iface(void)
 {
-	return s_recorder_event_iface;
+	return s_ext_evt_iface;
+}
+
+void recorder_set_streamer(streamer_handle_t s)
+{
+	audio_element_setdata(i2s_stream_reader, (void *)s);
 }
