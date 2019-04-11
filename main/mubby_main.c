@@ -60,25 +60,31 @@ typedef enum {
 	MUBBY_STATE_SHUTDOWN
 } mubby_state_t;
 
+struct app_context {
+	audio_player_handle_t 		ap;
+	audio_recorder_handle_t 	ar;
+	audio_event_iface_handle_t 	evt;
+	tcp_stream_handle_t			stream;
+	QueueHandle_t 				msg_queue;
+	mubby_state_t 				cur_state;
+	bool						cnt_chat;
+};
+
+typedef struct app_context *app_context_handle_t;
+typedef struct app_context app_context_t;
+
 static const char *TAG = "MUBBY";
-
-static QueueHandle_t s_pending_states; 
-static esp_mqtt_client_handle_t s_mqtt_client;
-
-static bool s_continue_chat = false;
-static mubby_state_t s_mubby_state;
-
 static int s_player_volume = -1;
 
 audio_board_handle_t g_board_handle = NULL;
 int g_server_sockfd = -1;
 
-static inline void push_state(mubby_state_t state)
+static inline void push_state(app_context_handle_t ctx, mubby_state_t state)
 {
-	xQueueSend(s_pending_states, (void *)&state, portMAX_DELAY);
+	xQueueSend(ctx->msg_queue, (void *)&state, portMAX_DELAY);
 }
 
-static esp_err_t msg_parser(char *msg)
+static esp_err_t msg_parser(app_context_handle_t ctx, esp_mqtt_client_handle_t client, char *msg)
 {
 	esp_err_t ret = ESP_OK;
 	cJSON *root, *header;
@@ -100,12 +106,13 @@ static esp_err_t msg_parser(char *msg)
 	if (!strcmp(header->valuestring, "chat")) {
 		cJSON *cont = cJSON_GetObjectItem(root, "continue");
 		if (cont && !strcmp(cont->valuestring, "true")) {
-			s_continue_chat = true;
+			ctx->cnt_chat = true;
 		} else {
-			s_continue_chat = false;
+			ctx->cnt_chat = false;
 		}
-		esp_mqtt_client_publish(s_mqtt_client, "mubby/server/soosang", "{\"state\": \"ok\"}", 0, 1, 0);
-		send(g_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0);
+		esp_mqtt_client_publish(client, "mubby/server/soosang", "{\"state\": \"ok\"}", 0, 1, 0);
+		//send(g_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0);
+		ctx->stream->write(ctx->stream, (char []){'e', 'n', 'd'}, 3);
 	} else if (!strcmp(header->valuestring, "control")) {
 		cJSON *sub = cJSON_GetObjectItem(root, "sub");
 		if (!sub) {
@@ -142,7 +149,7 @@ static esp_err_t msg_parser(char *msg)
 			audio_hal_set_volume(g_board_handle->audio_hal, s_player_volume);			
 		} else if (!strcmp(part->valuestring, "stt")) {
 			if (!strcmp(act->valuestring, "end")) {
-				ESP_ERROR_CHECK(recorder_stop());
+				ESP_ERROR_CHECK(recorder_stop(ctx->ar));
 			} else {
 				ESP_LOGE(TAG, "Invalid action '%s' for 'stt'", act->valuestring);
 				ret = ESP_ERR_INVALID_ARG;
@@ -168,6 +175,7 @@ errout:
 
 static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 {
+	app_context_handle_t ctx = (app_context_handle_t)event->user_context;
 	esp_mqtt_client_handle_t client = event->client;
 	int msg_id;
 	
@@ -193,7 +201,7 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 		ESP_LOGI(TAG, "MQTT_EVENT_DATA");
 		printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
 		printf("DATA=%.*s\r\n", event->data_len, event->data);
-		msg_parser(event->data);
+		msg_parser(ctx, client, event->data);
 		break;
 	case MQTT_EVENT_ERROR:
 		ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -205,17 +213,19 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 	return ESP_OK;
 }
 
-static void mqtt_start(void)
+static esp_err_t mqtt_start(app_context_handle_t ctx)
 {
 	const esp_mqtt_client_config_t mqtt_cfg = {
 		.uri = "mqtt://"CONFIG_SERVER_HOST":8889",
 		.event_handle = mqtt_event_handler,
+		.user_context = ctx,
 	};
 	
-	s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-	esp_mqtt_client_start(s_mqtt_client);
+	esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+	return esp_mqtt_client_start(mqtt_client);
 }
 
+#if 0
 static esp_err_t open_conn(const char *hostname, int port)
 {
 	struct sockaddr_in addr;
@@ -255,14 +265,16 @@ static void close_conn(void)
 		g_server_sockfd = -1;
 	}
 }
+#endif
 
 static void event_monitor_task(void *pvParameters)
 {
+	app_context_handle_t ctx = (app_context_handle_t)pvParameters;
+	audio_event_iface_handle_t evt = ctx->evt;
+	
 	bool pushed = false;
 	
 	ESP_LOGI(TAG, "EventMonitor created");
-	
-	audio_event_iface_handle_t evt = (audio_event_iface_handle_t)pvParameters;
 	
 	for (;;) {
 		audio_event_iface_msg_t msg;
@@ -280,20 +292,21 @@ static void event_monitor_task(void *pvParameters)
 					pushed = true;
 				} else if (pushed && (msg.cmd == PERIPH_BUTTON_RELEASE || msg.cmd == PERIPH_BUTTON_LONG_RELEASE)) {
 					pushed = false;
-					if (s_mubby_state == MUBBY_STATE_STANDBY) {
-						push_state(MUBBY_STATE_CONNECTING);
+					if (ctx->cur_state == MUBBY_STATE_STANDBY) {
+						push_state(ctx, MUBBY_STATE_CONNECTING);
 					}				
 				}
 			} else if ((int)msg.data == GPIO_NUM_39) {
 				if (msg.cmd == PERIPH_BUTTON_RELEASE || msg.cmd == PERIPH_BUTTON_LONG_RELEASE) {
 					printf("home pushed\n");
-					if (s_mubby_state == MUBBY_STATE_PLAYING) {
+					if (ctx->cur_state == MUBBY_STATE_PLAYING) {
 						printf("stopping player\n");
-						ESP_ERROR_CHECK(player_stop());
-					} else if (s_mubby_state == MUBBY_STATE_RECORDING) {
+						ESP_ERROR_CHECK(player_stop(ctx->ap));
+					} else if (ctx->cur_state == MUBBY_STATE_RECORDING) {
 						printf("stopping recorder\n");
-						ESP_ERROR_CHECK(recorder_stop());
-						send(g_server_sockfd, (char []){'b', 'r', 'k'}, 3, 0);
+						ESP_ERROR_CHECK(recorder_stop(ctx->ar));
+						//send(g_server_sockfd, (char []){'b', 'r', 'k'}, 3, 0);
+						ctx->stream->write(ctx->stream, (char []){'b', 'r', 'k'}, 3);
 					}
 				}
 			}
@@ -301,29 +314,29 @@ static void event_monitor_task(void *pvParameters)
 			
 		case MUBBY_ID_PLAYER:
 			if ((int)msg.data == PLAYER_STATE_STARTED) {
-				push_state(MUBBY_STATE_PLAYING);
+				push_state(ctx, MUBBY_STATE_PLAYING);
 			} else if ((int)msg.data == PLAYER_STATE_FINISHED) {
-				push_state(MUBBY_STATE_PLAYING_FINISHED);
+				push_state(ctx, MUBBY_STATE_PLAYING_FINISHED);
 			} else {
 				ESP_LOGE(TAG, "Error occurred at player");
-				push_state(MUBBY_STATE_RESET);
+				push_state(ctx, MUBBY_STATE_RESET);
 			}
 			break;
 			
 		case MUBBY_ID_RECORDER:
 			if ((int)msg.data == RECORDER_STATE_STARTED) {
-				push_state(MUBBY_STATE_RECORDING);
+				push_state(ctx, MUBBY_STATE_RECORDING);
 			} else if ((int)msg.data == RECORDER_STATE_FINISHED) {
-				push_state(MUBBY_STATE_RECORDING_FINISHED);
+				push_state(ctx, MUBBY_STATE_RECORDING_FINISHED);
 			} else {
 				ESP_LOGE(TAG, "Error occurred at recorder");
-				push_state(MUBBY_STATE_RESET);
+				push_state(ctx, MUBBY_STATE_RESET);
 			}
 			break;
 			
 		case MUBBY_ID_WIFIMGR:
 			if ((int)msg.data == WIFI_MANAGER_STATE_CONNECTED) {
-				mqtt_start();
+				ESP_ERROR_CHECK(mqtt_start(ctx));
 			} else if ((int)msg.data == WIFI_MANAGER_STATE_DISCONNECTED) {
 				ESP_LOGW(TAG, "STA failed to attach AP");
 			}
@@ -338,50 +351,59 @@ static void event_monitor_task(void *pvParameters)
 
 static void core_task(void *pvParameters)
 {
+	app_context_handle_t ctx = (app_context_handle_t)pvParameters;
+	
 	for (;;) {
-		xQueueReceive(s_pending_states, (void *)&s_mubby_state, portMAX_DELAY);
-		switch (s_mubby_state) {
+		xQueueReceive(ctx->msg_queue, (void *)&ctx->cur_state, portMAX_DELAY);
+		switch (ctx->cur_state) {
 		case MUBBY_STATE_RESET:
-			close_conn();
+			ctx->stream->close(ctx->stream);
+			//close_conn();
 			break;
 			
 		case MUBBY_STATE_STANDBY:
-			printf("Mubby is ready. Press REC key to start recording\n");
+			ESP_LOGV(TAG, "Mubby is ready. Press REC key to start recording\n");
 			break;
 		
 		case MUBBY_STATE_CONNECTING:
-			printf("Connecting to server\n");
-			if (open_conn(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT) != ESP_OK) {
-				push_state(MUBBY_STATE_RESET);
+			ESP_LOGV(TAG, "Connecting to server\n");
+			if (!ctx->stream->open(ctx->stream, CONFIG_SERVER_HOST, CONFIG_SERVER_PORT)) {
+			//if (open_conn(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT) != ESP_OK) {
+				push_state(ctx, MUBBY_STATE_RESET);
 				continue;
+			} else {
+				struct timeval timeout = {2, 0};
+				tcp_stream_set_timeout(ctx->stream, &timeout);
 			}
-			if (send(g_server_sockfd, (char []){'r', 'e', 'c'}, 3, 0) != 3) {
+			if (ctx->stream->write(ctx->stream, (char []){'r', 'e', 'c'}, 3) != 3) {
+			//if (send(g_server_sockfd, (char []){'r', 'e', 'c'}, 3, 0) != 3) {
 				ESP_LOGE(TAG, "Failed to send 'rec' to server");
-				push_state(MUBBY_STATE_RESET);
+				push_state(ctx, MUBBY_STATE_RESET);
 			}
-			ESP_ERROR_CHECK(recorder_start());
+			ESP_ERROR_CHECK(recorder_start(ctx->ar));
 			break;
 			
 		case MUBBY_STATE_RECORDING:
-			printf("Recording...\n");
+			ESP_LOGV(TAG, "Recording...\n");
 			break;
 			
 		case MUBBY_STATE_RECORDING_FINISHED:
-			printf("Recording finished\n");
-			ESP_ERROR_CHECK(player_start());
+			ESP_LOGV(TAG, "Recording finished\n");
+			ESP_ERROR_CHECK(player_start(ctx->ap));
 			break;
 			
 		case MUBBY_STATE_PLAYING:
-			printf("Playing...\n");
+			ESP_LOGV(TAG, "Playing...\n");
 			break;
 			
 		case MUBBY_STATE_PLAYING_FINISHED:
-			printf("Playing finished\n");
-			close_conn();
-			if (s_continue_chat) {
-				push_state(MUBBY_STATE_CONNECTING);
+			ESP_LOGV(TAG, "Playing finished\n");
+			ctx->stream->close(ctx->stream);
+			//close_conn();
+			if (ctx->cnt_chat) {
+				push_state(ctx, MUBBY_STATE_CONNECTING);
 			} else {
-				push_state(MUBBY_STATE_STANDBY);
+				push_state(ctx, MUBBY_STATE_STANDBY);
 			}
 			break;
 			
@@ -403,37 +425,46 @@ void app_main(void)
         err = nvs_flash_init();
     }
     
-    ESP_LOGI(TAG, "[APP] Startup...");
-    ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
-    
     g_board_handle = audio_board_init();
     audio_hal_ctrl_codec(g_board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
     audio_hal_get_volume(g_board_handle->audio_hal, &s_player_volume);
     
     ESP_LOGI(TAG, "Volume: %d", s_player_volume);
     
+    
+    app_context_handle_t app_ctx;
+    
+    app_ctx = calloc(1, sizeof(app_context_t));
+    mem_assert(app_ctx);
+    
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-	audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
+	app_ctx->evt = audio_event_iface_init(&evt_cfg);
+    mem_assert(app_ctx->evt);
     
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PHERIPH_SET_CONFIG();
-    esp_periph_set_handle_t periph_set = esp_periph_set_init(&periph_cfg);
+	esp_periph_set_handle_t periph_set = esp_periph_set_init(&periph_cfg);
     
     periph_button_cfg_t btn_cfg = {
 		.gpio_mask = GPIO_SEL_36 | GPIO_SEL_39,
 	};
 	esp_periph_handle_t button_handle = periph_button_init(&btn_cfg);	
 	esp_periph_start(periph_set, button_handle);
-	ESP_ERROR_CHECK(audio_event_iface_set_listener(esp_periph_set_get_event_iface(periph_set), evt));
+	ESP_ERROR_CHECK(audio_event_iface_set_listener(esp_periph_set_get_event_iface(periph_set), app_ctx->evt));
 
-	ESP_ERROR_CHECK(player_create());
-	ESP_ERROR_CHECK(audio_event_iface_set_listener(player_get_event_iface(), evt));
+	app_ctx->stream = tcp_stream_create();
+	mem_assert(app_ctx->stream);
 	
-	ESP_ERROR_CHECK(recorder_create());
-	ESP_ERROR_CHECK(audio_event_iface_set_listener(recorder_get_event_iface(), evt));
-	
-	s_pending_states = xQueueCreate(10, sizeof(int));
-	mem_assert(s_pending_states);
+	app_ctx->ap = player_create();
+	mem_assert(app_ctx->ap);
+	ESP_ERROR_CHECK(player_set_event_listener(app_ctx->ap, app_ctx->evt));
+	ESP_ERROR_CHECK(player_set_tcp_stream(app_ctx->ap, app_ctx->stream));
+
+	app_ctx->ar = recorder_create();
+	ESP_ERROR_CHECK(recorder_set_event_listener(app_ctx->ar, app_ctx->evt));
+	ESP_ERROR_CHECK(recorder_set_tcp_stream(app_ctx->ar, app_ctx->stream));
+	 
+	app_ctx->msg_queue = xQueueCreate(10, sizeof(int));
+	mem_assert(app_ctx->msg_queue);
 	
 	ESP_LOGI(TAG, "Starting Wi-Fi...");
 
@@ -441,15 +472,17 @@ void app_main(void)
 	ESP_ERROR_CHECK(http_server_start());
 
 	/* start the wifi manager task */
-	ESP_ERROR_CHECK(wifi_manager_start(evt));
+	ESP_ERROR_CHECK(wifi_manager_start(app_ctx->evt));
 	
-	//xReturned = xTaskCreatePinnedToCore(event_monitor_task, "event_monitor", 2048, (void *)evt, tskIDLE_PRIORITY + 2, NULL, 0);
-	xReturned = xTaskCreate(event_monitor_task, "event_monitor", 2048, (void *)evt, tskIDLE_PRIORITY + 2, NULL);
+	xReturned = xTaskCreate(event_monitor_task, "event_monitor", 2048, (void *)app_ctx, tskIDLE_PRIORITY + 2, NULL);
 	configASSERT(xReturned == pdPASS);
 	
-	//xReturned = xTaskCreatePinnedToCore(core_task, "core_task", 2048, NULL, tskIDLE_PRIORITY, NULL, 1);
-	xReturned = xTaskCreate(core_task, "core_task", 2048, NULL, tskIDLE_PRIORITY, NULL);
+	xReturned = xTaskCreate(core_task, "core_task", 2048, (void *)app_ctx, tskIDLE_PRIORITY, NULL);
 	configASSERT(xReturned == pdPASS);
 	
-	push_state(MUBBY_STATE_STANDBY);
+	ESP_LOGI(TAG, "[APP] Startup...");
+    ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
+	
+	push_state(app_ctx, MUBBY_STATE_STANDBY);
 }

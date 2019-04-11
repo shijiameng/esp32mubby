@@ -25,20 +25,22 @@
 #ifndef _PLAYER_H_
 #define _PLAYER_H_
 
-#include "streamer.h"
+#include "tcp_stream.h"
 #include "audio_event_iface.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-esp_err_t player_create(void);
-esp_err_t player_destroy(void);
-esp_err_t player_start(void);
-esp_err_t player_stop(void);
+typedef struct audio_player *audio_player_handle_t;
 
-audio_event_iface_handle_t player_get_event_iface(void);
-void player_set_streamer(streamer_handle_t s);
+audio_player_handle_t player_create(void);
+esp_err_t player_destroy(audio_player_handle_t ap);
+esp_err_t player_start(audio_player_handle_t ap);
+esp_err_t player_stop(audio_player_handle_t ap);
+esp_err_t player_set_event_listener(audio_player_handle_t ap, audio_event_iface_handle_t evt);
+audio_event_iface_handle_t player_get_event_iface(audio_player_handle_t ap);
+esp_err_t player_set_tcp_stream(audio_player_handle_t ap, tcp_stream_handle_t stream);
 
 #ifdef __cplusplus
 }

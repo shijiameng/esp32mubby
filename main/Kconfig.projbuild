@@ -65,5 +65,11 @@ config TCP_TIMEOUT
 	default 2000
 	help
 		TCP timeout
+		
+config ENABLE_SECURITY_PROTO
+	bool "Enable Security Protocols"
+	default n
+	help
+		Enable TLS and SSL protocols
 
 endmenu

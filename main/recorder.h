@@ -25,20 +25,23 @@
 #ifndef _RECORDER_H_
 #define _RECORDER_H_
 
+#include "tcp_stream.h"
 #include "audio_event_iface.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-esp_err_t recorder_create(void);
-esp_err_t recorder_destroy(void);
-esp_err_t recorder_start(void);
-esp_err_t recorder_stop(void);
+typedef struct audio_recorder *audio_recorder_handle_t;
 
-audio_event_iface_handle_t recorder_get_event_iface(void);
-void recorder_set_streamer(streamer_handle_t s);
+audio_recorder_handle_t recorder_create(void);
+esp_err_t recorder_destroy(audio_recorder_handle_t ar);
+esp_err_t recorder_start(audio_recorder_handle_t ar);
+esp_err_t recorder_stop(audio_recorder_handle_t ar);
 
+esp_err_t recorder_set_event_listener(audio_recorder_handle_t ar, audio_event_iface_handle_t evt);
+audio_event_iface_handle_t recorder_get_event_iface(audio_recorder_handle_t ar);
+esp_err_t recorder_set_tcp_stream(audio_recorder_handle_t ar, tcp_stream_handle_t stream);
 
 #ifdef __cplusplus
 }

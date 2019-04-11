@@ -50,6 +50,9 @@ extern "C" {
 #define WIFI_MANAGER_STATE_CONNECTED  	(0)
 #define WIFI_MANAGER_STATE_DISCONNECTED (1)
 
+typedef struct app_context *app_context_handle_t;
+typedef struct app_context app_context_t;
+
 #ifdef __cplusplus
 }
 #endif
