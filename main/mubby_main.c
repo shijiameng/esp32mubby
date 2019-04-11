@@ -48,31 +48,6 @@
 
 #include <openssl/ssl.h>
 
-typedef enum {
-	MUBBY_STATE_RESET = -1,
-	MUBBY_STATE_STANDBY = 0,
-	MUBBY_STATE_CONNECTING,
-	MUBBY_STATE_RECORDING,
-	MUBBY_STATE_STOP_RECORDING,
-	MUBBY_STATE_RECORDING_FINISHED,
-	MUBBY_STATE_PLAYING,
-	MUBBY_STATE_PLAYING_FINISHED,
-	MUBBY_STATE_SHUTDOWN
-} mubby_state_t;
-
-struct app_context {
-	audio_player_handle_t 		ap;
-	audio_recorder_handle_t 	ar;
-	audio_event_iface_handle_t 	evt;
-	tcp_stream_handle_t			stream;
-	QueueHandle_t 				msg_queue;
-	mubby_state_t 				cur_state;
-	bool						cnt_chat;
-};
-
-typedef struct app_context *app_context_handle_t;
-typedef struct app_context app_context_t;
-
 static const char *TAG = "MUBBY";
 static int s_player_volume = -1;
 
@@ -82,6 +57,17 @@ int g_server_sockfd = -1;
 static inline void push_state(app_context_handle_t ctx, mubby_state_t state)
 {
 	xQueueSend(ctx->msg_queue, (void *)&state, portMAX_DELAY);
+}
+
+static inline char *get_macaddr(app_context_handle_t app_ctx)
+{
+	char *macbuf = malloc(18);
+	
+	snprintf(macbuf, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
+		app_ctx->macaddr[0], app_ctx->macaddr[1], app_ctx->macaddr[2], 
+		app_ctx->macaddr[3], app_ctx->macaddr[4], app_ctx->macaddr[5]);
+		
+	return macbuf;
 }
 
 static esp_err_t msg_parser(app_context_handle_t ctx, esp_mqtt_client_handle_t client, char *msg)
@@ -110,7 +96,14 @@ static esp_err_t msg_parser(app_context_handle_t ctx, esp_mqtt_client_handle_t c
 		} else {
 			ctx->cnt_chat = false;
 		}
-		esp_mqtt_client_publish(client, "mubby/server/soosang", "{\"state\": \"ok\"}", 0, 1, 0);
+		
+		{
+			char topic[32], *macaddr;
+			macaddr = get_macaddr(ctx);
+			snprintf(topic, sizeof(topic), "mubby/server/%s", macaddr);
+			free(macaddr);
+			esp_mqtt_client_publish(client, topic, "{\"state\": \"ok\"}", 0, 1, 0);
+		}
 		//send(g_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0);
 		ctx->stream->write(ctx->stream, (char []){'e', 'n', 'd'}, 3);
 	} else if (!strcmp(header->valuestring, "control")) {
@@ -181,9 +174,15 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 	
 	switch (event->event_id) {
 	case MQTT_EVENT_CONNECTED:
-		ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-		msg_id = esp_mqtt_client_subscribe(client, "mubby/client/soosang", 0);
-		ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+		{
+			ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+			char topic[32], *macaddr;
+			macaddr = get_macaddr(ctx);
+			snprintf(topic, sizeof(topic), "mubby/client/%s", macaddr);
+			free(macaddr);
+			msg_id = esp_mqtt_client_subscribe(client, topic, 0);
+			ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+		}
 		break;
 	case MQTT_EVENT_DISCONNECTED:
 		ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -266,6 +265,34 @@ static void close_conn(void)
 	}
 }
 #endif
+
+static bool mubby_auth(app_context_handle_t app_ctx)
+{
+#if 1
+	tcp_stream_handle_t stream = app_ctx->stream;
+	char macbuf[18] = {0};
+	char resp[8] = {0};
+	
+	snprintf(macbuf, sizeof(macbuf), "%02x:%02x:%02x:%02x:%02x:%02x",
+		app_ctx->macaddr[0], app_ctx->macaddr[1], app_ctx->macaddr[2], 
+		app_ctx->macaddr[3], app_ctx->macaddr[4], app_ctx->macaddr[5]);
+	
+	if (stream->write(stream, macbuf, sizeof(macbuf)) < 0) {
+		ESP_LOGE(TAG, "failed to send auth message");
+		return false;
+	}
+	
+	if (stream->read(stream, resp, sizeof(resp)) < 0) {
+		ESP_LOGE(TAG, "failed to get response from server");
+		return false;
+	}
+	
+	if (!strncmp(resp, "accept", sizeof(resp))) {
+		return true;
+	}
+#endif
+	return false;	
+}
 
 static void event_monitor_task(void *pvParameters)
 {
@@ -357,16 +384,18 @@ static void core_task(void *pvParameters)
 		xQueueReceive(ctx->msg_queue, (void *)&ctx->cur_state, portMAX_DELAY);
 		switch (ctx->cur_state) {
 		case MUBBY_STATE_RESET:
+			ESP_LOGE(TAG, "Reseting...");
 			ctx->stream->close(ctx->stream);
+			push_state(ctx, MUBBY_STATE_STANDBY);
 			//close_conn();
 			break;
 			
 		case MUBBY_STATE_STANDBY:
-			ESP_LOGV(TAG, "Mubby is ready. Press REC key to start recording\n");
+			ESP_LOGI(TAG, "Mubby is ready. Press REC key to start recording");
 			break;
 		
 		case MUBBY_STATE_CONNECTING:
-			ESP_LOGV(TAG, "Connecting to server\n");
+			ESP_LOGI(TAG, "Connecting to server");
 			if (!ctx->stream->open(ctx->stream, CONFIG_SERVER_HOST, CONFIG_SERVER_PORT)) {
 			//if (open_conn(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT) != ESP_OK) {
 				push_state(ctx, MUBBY_STATE_RESET);
@@ -374,6 +403,10 @@ static void core_task(void *pvParameters)
 			} else {
 				struct timeval timeout = {2, 0};
 				tcp_stream_set_timeout(ctx->stream, &timeout);
+				if (!mubby_auth(ctx)) {
+					push_state(ctx, MUBBY_STATE_RESET);
+					continue;
+				}
 			}
 			if (ctx->stream->write(ctx->stream, (char []){'r', 'e', 'c'}, 3) != 3) {
 			//if (send(g_server_sockfd, (char []){'r', 'e', 'c'}, 3, 0) != 3) {
@@ -384,20 +417,20 @@ static void core_task(void *pvParameters)
 			break;
 			
 		case MUBBY_STATE_RECORDING:
-			ESP_LOGV(TAG, "Recording...\n");
+			ESP_LOGI(TAG, "Recording...");
 			break;
 			
 		case MUBBY_STATE_RECORDING_FINISHED:
-			ESP_LOGV(TAG, "Recording finished\n");
+			ESP_LOGI(TAG, "Recording finished");
 			ESP_ERROR_CHECK(player_start(ctx->ap));
 			break;
 			
 		case MUBBY_STATE_PLAYING:
-			ESP_LOGV(TAG, "Playing...\n");
+			ESP_LOGI(TAG, "Playing...");
 			break;
 			
 		case MUBBY_STATE_PLAYING_FINISHED:
-			ESP_LOGV(TAG, "Playing finished\n");
+			ESP_LOGI(TAG, "Playing finished");
 			ctx->stream->close(ctx->stream);
 			//close_conn();
 			if (ctx->cnt_chat) {
@@ -472,7 +505,7 @@ void app_main(void)
 	ESP_ERROR_CHECK(http_server_start());
 
 	/* start the wifi manager task */
-	ESP_ERROR_CHECK(wifi_manager_start(app_ctx->evt));
+	ESP_ERROR_CHECK(wifi_manager_start(app_ctx, app_ctx->evt));
 	
 	xReturned = xTaskCreate(event_monitor_task, "event_monitor", 2048, (void *)app_ctx, tskIDLE_PRIORITY + 2, NULL);
 	configASSERT(xReturned == pdPASS);

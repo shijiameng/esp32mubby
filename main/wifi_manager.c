@@ -512,6 +512,8 @@ void wifi_manager_filter_unique( wifi_ap_record_t * aplist, uint16_t * aps)
 
 void wifi_manager( void * pvParameters )
 {
+	app_context_handle_t app_ctx = (app_context_handle_t)pvParameters;
+	
 	/* memory allocation of objects used by the task */
 	wifi_manager_json_mutex = xSemaphoreCreateMutex();
 	accessp_records = (wifi_ap_record_t*)malloc(sizeof(wifi_ap_record_t) * MAX_AP_NUM);
@@ -584,6 +586,10 @@ void wifi_manager( void * pvParameters )
 	/* init wifi as station + access point */
 	wifi_init_config_t wifi_init_config = WIFI_INIT_CONFIG_DEFAULT();
 	ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_config));
+	ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_STA, app_ctx->macaddr));
+    ESP_LOGI(TAG, "MAC: %02x:%02x:%02x:%02x:%02x:%02x", 
+				app_ctx->macaddr[0], app_ctx->macaddr[1], app_ctx->macaddr[2], 
+				app_ctx->macaddr[3], app_ctx->macaddr[4], app_ctx->macaddr[5]);
 	ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 	ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 	ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_AP, wifi_settings.ap_bandwidth));
@@ -760,14 +766,14 @@ void wifi_manager( void * pvParameters )
 } /*void wifi_manager*/
 
 
-esp_err_t wifi_manager_start(audio_event_iface_handle_t event_listener)
+esp_err_t wifi_manager_start(app_context_handle_t app_ctx, audio_event_iface_handle_t event_listener)
 {
 	audio_event_iface_cfg_t cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
 	wifimgr_event_iface = audio_event_iface_init(&cfg);
 	
 	ESP_ERROR_CHECK(audio_event_iface_set_listener(wifimgr_event_iface, event_listener));
 	
-	if (xTaskCreate(wifi_manager, "wifi_manager", WIFI_MANAGER_STACK_SIZE, NULL, WIFI_MANAGER_TASK_PRIORITY, NULL) != pdPASS) {
+	if (xTaskCreate(wifi_manager, "wifi_manager", WIFI_MANAGER_STACK_SIZE, (void *)app_ctx, WIFI_MANAGER_TASK_PRIORITY, NULL) != pdPASS) {
 		ESP_LOGE(TAG, "Failed to start wifi manager");
 		return ESP_FAIL;
 	}

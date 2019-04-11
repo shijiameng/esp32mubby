@@ -34,6 +34,7 @@ Contains the freeRTOS task and all necessary support
 
 #include "esp_wifi.h"
 #include "audio_event_iface.h"
+#include "mubby.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -295,7 +296,7 @@ void wifi_manager_clear_access_points_json();
  */
 void wifi_manager_initialise_mdns();
 
-esp_err_t wifi_manager_start(audio_event_iface_handle_t event_listener);
+esp_err_t wifi_manager_start(app_context_handle_t app_ctx, audio_event_iface_handle_t event_listener);
 
 #ifdef __cplusplus
 }

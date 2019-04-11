@@ -25,6 +25,9 @@
 #ifndef _MUBBY_H_
 #define _MUBBY_H_
 
+#include "player.h"
+#include "recorder.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -49,6 +52,30 @@ extern "C" {
 
 #define WIFI_MANAGER_STATE_CONNECTED  	(0)
 #define WIFI_MANAGER_STATE_DISCONNECTED (1)
+
+typedef enum {
+	MUBBY_STATE_RESET = -1,
+	MUBBY_STATE_STANDBY = 0,
+	MUBBY_STATE_CONNECTING,
+	MUBBY_STATE_RECORDING,
+	MUBBY_STATE_STOP_RECORDING,
+	MUBBY_STATE_RECORDING_FINISHED,
+	MUBBY_STATE_PLAYING,
+	MUBBY_STATE_PLAYING_FINISHED,
+	MUBBY_STATE_SHUTDOWN
+} mubby_state_t;
+
+
+struct app_context {
+	audio_player_handle_t 		ap;
+	audio_recorder_handle_t 	ar;
+	audio_event_iface_handle_t 	evt;
+	tcp_stream_handle_t			stream;
+	uint8_t						macaddr[6];
+	QueueHandle_t 				msg_queue;
+	mubby_state_t 				cur_state;
+	bool						cnt_chat;
+};
 
 typedef struct app_context *app_context_handle_t;
 typedef struct app_context app_context_t;
