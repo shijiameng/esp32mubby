@@ -70,7 +70,6 @@ static int recorder_write_cb(audio_element_handle_t el, char *buf, int len, Tick
 {
 	tcp_stream_handle_t stream = (tcp_stream_handle_t)ctx;
 	int write_len = stream->write(stream, buf, len);
-	//int write_len = send(g_server_sockfd, buf, len, 0);
 	return write_len;
 }
 

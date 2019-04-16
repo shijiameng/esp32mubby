@@ -24,23 +24,84 @@
 
 #include "sdkconfig.h"
 #include "tcp_stream.h"
+#include "mubby.h"
+#include "esp_log.h"
 
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
-#include <openssl/ssl.h>
+#include "mbedtls/platform.h"
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/error.h"
+#include "mbedtls/certs.h"
 #endif
 
 struct tcp_stream_context {
-	int sock;
-    bool is_open;
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
-    SSL_CTX *ssl_ctx;
-    SSL *ssl;
+    mbedtls_entropy_context entropy;
+	mbedtls_ctr_drbg_context ctr_drbg;
+	mbedtls_ssl_context ssl;
+	mbedtls_x509_crt cacert;
+	mbedtls_x509_crt clntcert;
+	mbedtls_pk_context clntkey;
+	mbedtls_ssl_config conf;
+	mbedtls_net_context server_fd;
+#else
+	int sock;
 #endif
+	bool is_open;
 };
+
+static const char *TAG = "STREAM";
 
 static bool tcp_stream_open(tcp_stream_handle_t s, char *hostname, int port)
 {
 	tcp_stream_context_handle_t ctx = s->context;
+	
+	ESP_LOGI(TAG, "Connecting to %s:%u...", hostname, (uint16_t)port);
+	
+#ifdef CONFIG_ENABLE_SECURITY_PROTO
+	int flags, ret;
+	char str_port[6] = {0};
+	
+	snprintf(str_port, sizeof(str_port), "%u", (uint16_t)port);
+	
+	mbedtls_net_init(&ctx->server_fd);
+
+	if ((ret = mbedtls_net_connect(&ctx->server_fd, hostname,
+								  str_port, MBEDTLS_NET_PROTO_TCP)) != 0) {
+		ESP_LOGE(TAG, "mbedtls_net_connect returned -%x", -ret);
+		return false;
+	}
+
+	ESP_LOGI(TAG, "Connected.");
+
+	mbedtls_ssl_set_bio(&ctx->ssl, &ctx->server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
+
+	ESP_LOGI(TAG, "Performing the SSL/TLS handshake...");
+
+	while ((ret = mbedtls_ssl_handshake(&ctx->ssl)) != 0) {
+		if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+			ESP_LOGE(TAG, "mbedtls_ssl_handshake returned -0x%x", -ret);
+			return false;
+		}
+	}
+
+	ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
+
+	if ((flags = mbedtls_ssl_get_verify_result(&ctx->ssl)) != 0) {
+		/* In real life, we probably want to close connection if ret != 0 */
+		ESP_LOGW(TAG, "Failed to verify peer certificate!");
+		return false;
+	} else {
+		ESP_LOGI(TAG, "Certificate verified.");
+	}
+
+	ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(&ctx->ssl));
+	
+#else
+	
 	struct sockaddr_in addr;
 	
 	ctx->sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -50,7 +111,7 @@ static bool tcp_stream_open(tcp_stream_handle_t s, char *hostname, int port)
 	
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons((short)port);
+	addr.sin_port = htons((uint16_t)port);
 	
 	if (inet_pton(AF_INET, hostname, &addr.sin_addr) < 0) {
 		close(ctx->sock);
@@ -61,16 +122,9 @@ static bool tcp_stream_open(tcp_stream_handle_t s, char *hostname, int port)
 		close(ctx->sock);
 		return false;
 	}
-	
-	ctx->is_open = true;
-	
-#ifdef CONFIG_ENABLE_SECURITY_PROTO
-	SSL_set_fd(ctx->ssl, ctx->sock);
-	
-	if (SSL_connect(ctx->ssl) < 0) {		
-		return false;
-	}
 #endif
+
+	ctx->is_open = true;
 	
 	return true;
 }
@@ -81,10 +135,12 @@ static bool tcp_stream_close(tcp_stream_handle_t s)
 		tcp_stream_context_handle_t ctx = s->context;
 		if (ctx && ctx->is_open) {
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
-			SSL_shutdown(ctx->ssl);
-#endif
+			mbedtls_ssl_session_reset(&ctx->ssl);
+			mbedtls_net_free(&ctx->server_fd);
+#else
 			close(ctx->sock);
 			ctx->sock = -1;
+#endif
 			ctx->is_open = false;
 			return true;
 		}
@@ -93,21 +149,21 @@ static bool tcp_stream_close(tcp_stream_handle_t s)
 	return false;
 }
 
-static int tcp_stream_read(tcp_stream_handle_t s, char *buffer, int bufsz)
+static int tcp_stream_read(tcp_stream_handle_t s, void *buffer, int bufsz)
 {
 	tcp_stream_context_handle_t ctx = s->context;
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
-	return SSL_read(ctx->ssl, buffer, bufsz);
+	return mbedtls_ssl_read(&ctx->ssl, buffer, bufsz);
 #else
 	return recv(ctx->sock, buffer, bufsz, 0);
 #endif
 }
 
-static int tcp_stream_write(tcp_stream_handle_t s, char *buffer, int bufsz)
+static int tcp_stream_write(tcp_stream_handle_t s, const void *buffer, int bufsz)
 {
 	tcp_stream_context_handle_t ctx = s->context;
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
-	return SSL_write(ctx->ssl, buffer, bufsz);
+	return mbedtls_ssl_write(&ctx->ssl, buffer, bufsz);
 #else
 	return send(ctx->sock, buffer, bufsz, 0);
 #endif
@@ -117,6 +173,7 @@ tcp_stream_handle_t tcp_stream_create(void)
 {
 	tcp_stream_handle_t s;
 	tcp_stream_context_handle_t ctx;
+	int ret;
 	
 	s = calloc(1, sizeof(struct tcp_stream));
 	if (!s) {
@@ -129,12 +186,76 @@ tcp_stream_handle_t tcp_stream_create(void)
 		return NULL;
 	}
 
-	ctx->sock = -1;
-	ctx->is_open = false;
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
-	ctx->ssl_ctx = SSL_CTX_new(TLSv1_1_client_method());
-	ctx->ssl = SSL_new(ctx->ssl_ctx);
+	mbedtls_ssl_init(&ctx->ssl);
+    mbedtls_x509_crt_init(&ctx->cacert);
+    mbedtls_x509_crt_init(&ctx->clntcert);
+    mbedtls_pk_init(&ctx->clntkey);
+    mbedtls_ctr_drbg_init(&ctx->ctr_drbg);
+	mbedtls_ssl_config_init(&ctx->conf);
+    mbedtls_entropy_init(&ctx->entropy);
+    
+	if ((ret = mbedtls_ctr_drbg_seed(&ctx->ctr_drbg, mbedtls_entropy_func, &ctx->entropy, NULL, 0)) != 0) {
+		ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed returned %d", ret);
+		return NULL;
+	}
+
+    ESP_LOGI(TAG, "Loading the CA root certificate...");
+
+	ret = mbedtls_x509_crt_parse(&ctx->cacert, cacert_pem_start,
+								 strlen((char *)cacert_pem_start) + 1);
+	if (ret < 0) {
+		ESP_LOGE(TAG, "Failed to parse CA root certificate ret=-0x%x\n\n", -ret);
+		return NULL;
+	}
+	
+	ESP_LOGI(TAG, "Loading the client certificate...");
+	
+	ret = mbedtls_x509_crt_parse(&ctx->clntcert, cert_pem_start, strlen((char *)cert_pem_start) + 1);
+	if (ret < 0) {
+		ESP_LOGE(TAG, "Failed to parse client certificate, ret=-0x%x", -ret);
+		return NULL;
+	}
+	
+	ESP_LOGI(TAG, "Loading the client private key...");
+	
+	ret = mbedtls_pk_parse_key(&ctx->clntkey, privkey_pem_start, strlen((char *)privkey_pem_start) + 1, NULL, 0);
+	if (ret < 0) {
+		ESP_LOGE(TAG, "Failed to parse private key, ret=-0x%x", -ret);
+		return NULL;
+	}
+	
+	ESP_LOGI(TAG, "Setting the client certificate...");
+	
+	ret = mbedtls_ssl_conf_own_cert(&ctx->conf, &ctx->clntcert, &ctx->clntkey);
+	if (ret < 0) {
+		ESP_LOGE(TAG, "Failed to set client certificate, ret=-0x%x", -ret);
+		return NULL;
+	}
+	
+	ESP_LOGI(TAG, "Setting up the SSL/TLS structure...");
+
+	if ((ret = mbedtls_ssl_config_defaults(&ctx->conf,
+										  MBEDTLS_SSL_IS_CLIENT,
+										  MBEDTLS_SSL_TRANSPORT_STREAM,
+										  MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
+		ESP_LOGE(TAG, "mbedtls_ssl_config_defaults returned %d", ret);
+		return NULL;
+	}
+	
+	mbedtls_ssl_conf_authmode(&ctx->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_ca_chain(&ctx->conf, &ctx->cacert, NULL);
+    mbedtls_ssl_conf_rng(&ctx->conf, mbedtls_ctr_drbg_random, &ctx->ctr_drbg);
+
+	if ((ret = mbedtls_ssl_setup(&ctx->ssl, &ctx->conf)) != 0) {
+		ESP_LOGE(TAG, "mbedtls_ssl_setup returned -0x%x\n\n", -ret);
+		return NULL;
+	}
+#else
+	ctx->sock = -1;
 #endif
+	ctx->is_open = false;
+
 	s->context = ctx;
 	s->open = tcp_stream_open;
 	s->close = tcp_stream_close;
@@ -147,15 +268,10 @@ tcp_stream_handle_t tcp_stream_create(void)
 void tcp_stream_destroy(tcp_stream_handle_t s)
 {
 	tcp_stream_context_handle_t ctx = s->context;
-	if (s) {
-#ifdef CONFIG_ENABLE_SECURITY_PROTO
-		if (ctx->ssl) {
-			SSL_free(ctx->ssl);
+	if (s && ctx) {
+		if (ctx->is_open) {
+			s->close(s);
 		}
-		if (ctx->ssl_ctx) {
-			SSL_CTX_free(ctx->ssl_ctx);
-		}
-#endif
 		free(ctx);
 		free(s);
 	}
@@ -163,6 +279,8 @@ void tcp_stream_destroy(tcp_stream_handle_t s)
 
 void tcp_stream_set_timeout(tcp_stream_handle_t s, struct timeval *timeout)
 {
+#ifndef CONFIG_ENABLE_SECURITY_PROTO
 	tcp_stream_context_handle_t ctx = s->context;
 	setsockopt(ctx->sock, SOL_SOCKET, SO_RCVTIMEO, timeout, sizeof(struct timeval));
+#endif
 }

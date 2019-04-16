@@ -86,7 +86,6 @@ static int player_read_cb(audio_element_handle_t el, char *buf, int len, TickTyp
 	tcp_stream_handle_t stream = (tcp_stream_handle_t)ctx;
 	
 	int read_len = stream->read(stream, buf, len);
-	//int read_len = recv(g_server_sockfd, buf, len, 0);
 	if (read_len == 0 || (read_len == -1 && errno == EAGAIN)) {
 		read_len = AEL_IO_DONE;
 	}

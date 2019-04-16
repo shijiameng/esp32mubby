@@ -39,8 +39,8 @@ struct tcp_stream {
 	void *context;
 	bool (*open)(tcp_stream_handle_t s, char *hostname, int port);
     bool (*close)(tcp_stream_handle_t s);
-    int (*read)(tcp_stream_handle_t s, char *buffer, int bufsz);
-    int (*write)(tcp_stream_handle_t s, char *buffer, int bufsz); 
+    int (*read)(tcp_stream_handle_t s, void *buffer, int bufsz);
+    int (*write)(tcp_stream_handle_t s, const void *buffer, int bufsz); 
 };
 
 tcp_stream_handle_t tcp_stream_create(void);

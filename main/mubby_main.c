@@ -29,9 +29,6 @@
 #include "freertos/event_groups.h"
 
 #include "sdkconfig.h"
-
-#include "lwip/sockets.h"
-#include "lwip/err.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include "mqtt_client.h"
@@ -46,13 +43,10 @@
 #include "player.h"
 #include "recorder.h"
 
-#include <openssl/ssl.h>
-
 static const char *TAG = "MUBBY";
 static int s_player_volume = -1;
 
 audio_board_handle_t g_board_handle = NULL;
-int g_server_sockfd = -1;
 
 static inline void push_state(app_context_handle_t ctx, mubby_state_t state)
 {
@@ -104,7 +98,6 @@ static esp_err_t msg_parser(app_context_handle_t ctx, esp_mqtt_client_handle_t c
 			free(macaddr);
 			esp_mqtt_client_publish(client, topic, "{\"state\": \"ok\"}", 0, 1, 0);
 		}
-		//send(g_server_sockfd, (char []){'e', 'n', 'd'}, 3, 0);
 		ctx->stream->write(ctx->stream, (char []){'e', 'n', 'd'}, 3);
 	} else if (!strcmp(header->valuestring, "control")) {
 		cJSON *sub = cJSON_GetObjectItem(root, "sub");
@@ -215,60 +208,25 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
 static esp_err_t mqtt_start(app_context_handle_t ctx)
 {
 	const esp_mqtt_client_config_t mqtt_cfg = {
+#ifdef CONFIG_ENABLE_SECURITY_PROTO
+		.uri = "mqtts://"CONFIG_SERVER_HOST":8889",
+		.cert_pem = (const char *)cert_pem_start,
+		.client_cert_pem = (const char *)cert_pem_start,
+		.client_key_pem = (const char *)privkey_pem_start,
+#else
 		.uri = "mqtt://"CONFIG_SERVER_HOST":8889",
+#endif
 		.event_handle = mqtt_event_handler,
 		.user_context = ctx,
+		
 	};
 	
 	esp_mqtt_client_handle_t mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
 	return esp_mqtt_client_start(mqtt_client);
 }
 
-#if 0
-static esp_err_t open_conn(const char *hostname, int port)
-{
-	struct sockaddr_in addr;
-	
-	g_server_sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (g_server_sockfd < 0) {
-		ESP_LOGE(TAG, "Failed to open socket");
-		return ESP_FAIL;
-	}
-	
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons((short)port);
-	if (inet_pton(AF_INET, hostname, &addr.sin_addr) < 0) {
-		ESP_LOGE(TAG, "Invalid hostname - %s", hostname);
-		return ESP_FAIL;
-	}
-	
-	if (connect(g_server_sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-		ESP_LOGE(TAG, "Failed to connect to server %s:%d", hostname, port);
-		return ESP_FAIL;
-	}
-	
-	struct timeval timeout = {2, 0};
-	if (setsockopt(g_server_sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-		ESP_LOGE(TAG, "Failed to set socket timeout");
-		return ESP_FAIL;
-	}
-	
-	return ESP_OK;
-}
-
-static void close_conn(void)
-{
-	if (g_server_sockfd > 0) {
-		close(g_server_sockfd);
-		g_server_sockfd = -1;
-	}
-}
-#endif
-
 static bool mubby_auth(app_context_handle_t app_ctx)
 {
-#if 1
 	tcp_stream_handle_t stream = app_ctx->stream;
 	char macbuf[18] = {0};
 	char resp[8] = {0};
@@ -290,7 +248,7 @@ static bool mubby_auth(app_context_handle_t app_ctx)
 	if (!strncmp(resp, "accept", sizeof(resp))) {
 		return true;
 	}
-#endif
+
 	return false;	
 }
 
@@ -332,7 +290,6 @@ static void event_monitor_task(void *pvParameters)
 					} else if (ctx->cur_state == MUBBY_STATE_RECORDING) {
 						printf("stopping recorder\n");
 						ESP_ERROR_CHECK(recorder_stop(ctx->ar));
-						//send(g_server_sockfd, (char []){'b', 'r', 'k'}, 3, 0);
 						ctx->stream->write(ctx->stream, (char []){'b', 'r', 'k'}, 3);
 					}
 				}
@@ -387,7 +344,6 @@ static void core_task(void *pvParameters)
 			ESP_LOGE(TAG, "Reseting...");
 			ctx->stream->close(ctx->stream);
 			push_state(ctx, MUBBY_STATE_STANDBY);
-			//close_conn();
 			break;
 			
 		case MUBBY_STATE_STANDBY:
@@ -397,7 +353,6 @@ static void core_task(void *pvParameters)
 		case MUBBY_STATE_CONNECTING:
 			ESP_LOGI(TAG, "Connecting to server");
 			if (!ctx->stream->open(ctx->stream, CONFIG_SERVER_HOST, CONFIG_SERVER_PORT)) {
-			//if (open_conn(CONFIG_SERVER_HOST, CONFIG_SERVER_PORT) != ESP_OK) {
 				push_state(ctx, MUBBY_STATE_RESET);
 				continue;
 			} else {
@@ -409,7 +364,6 @@ static void core_task(void *pvParameters)
 				}
 			}
 			if (ctx->stream->write(ctx->stream, (char []){'r', 'e', 'c'}, 3) != 3) {
-			//if (send(g_server_sockfd, (char []){'r', 'e', 'c'}, 3, 0) != 3) {
 				ESP_LOGE(TAG, "Failed to send 'rec' to server");
 				push_state(ctx, MUBBY_STATE_RESET);
 			}
@@ -432,7 +386,6 @@ static void core_task(void *pvParameters)
 		case MUBBY_STATE_PLAYING_FINISHED:
 			ESP_LOGI(TAG, "Playing finished");
 			ctx->stream->close(ctx->stream);
-			//close_conn();
 			if (ctx->cnt_chat) {
 				push_state(ctx, MUBBY_STATE_CONNECTING);
 			} else {
