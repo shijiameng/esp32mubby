@@ -427,7 +427,7 @@ void app_main(void)
 	app_ctx->evt = audio_event_iface_init(&evt_cfg);
     mem_assert(app_ctx->evt);
     
-    esp_periph_config_t periph_cfg = DEFAULT_ESP_PHERIPH_SET_CONFIG();
+    esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
 	esp_periph_set_handle_t periph_set = esp_periph_set_init(&periph_cfg);
     
     periph_button_cfg_t btn_cfg = {
