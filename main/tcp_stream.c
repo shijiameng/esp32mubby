@@ -169,6 +169,11 @@ static int tcp_stream_write(tcp_stream_handle_t s, const void *buffer, int bufsz
 #endif
 }
 
+
+/**
+ * @brief Create a TCP stream
+ * @return TCP stream handle on success, NULL otherwise
+ */
 tcp_stream_handle_t tcp_stream_create(void)
 {
 	tcp_stream_handle_t s;
@@ -265,7 +270,12 @@ tcp_stream_handle_t tcp_stream_create(void)
 	return s;
 }
 
-void tcp_stream_destroy(tcp_stream_handle_t s)
+/**
+ * @brief Destroy a TCP stream
+ * @param [in] s The TCP stream handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
+esp_err_t tcp_stream_destroy(tcp_stream_handle_t s)
 {
 	tcp_stream_context_handle_t ctx = s->context;
 	if (s && ctx) {
@@ -274,9 +284,17 @@ void tcp_stream_destroy(tcp_stream_handle_t s)
 		}
 		free(ctx);
 		free(s);
+		return ESP_OK;
 	}
+	
+	return ESP_FAIL;
 }
 
+/**
+ * @brief Set a timeout for the TCP I/O
+ * @param [in] s 		The TCP stream handle
+ * @param [in] timeout 	The timeout structure
+ */
 void tcp_stream_set_timeout(tcp_stream_handle_t s, struct timeval *timeout)
 {
 #ifndef CONFIG_ENABLE_SECURITY_PROTO

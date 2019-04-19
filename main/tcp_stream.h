@@ -36,16 +36,65 @@ typedef struct tcp_stream_context tcp_stream_context_t, *tcp_stream_context_hand
 typedef struct tcp_stream tcp_stream_t, *tcp_stream_handle_t;
 
 struct tcp_stream {
+	/**
+	 * @brief The private data of TCP stream
+	 */
 	void *context;
+	
+	/**
+	 * @brief Open a TCP stream
+	 * @param [in] s 			The TCP stream handle
+	 * @param [in] hostname 	The server hostname
+	 * @param [in] port			The server port
+	 * @return true on success, false on error
+	 */
 	bool (*open)(tcp_stream_handle_t s, char *hostname, int port);
+    
+    /**
+     * @brief Close a TCP stream
+     * @param [in] s The TCP stream handle
+     * @return true on success, false on error
+     */
     bool (*close)(tcp_stream_handle_t s);
+    
+    /**
+     * @brief Read a data block from the TCP stream
+     * @param [in]  s		The TCP stream handle
+     * @param [out]	buffer	The buffer in which the data will be saved
+     * @param [in]	bufsz	The buffer size
+     * @return The number of bytes read, -1 on error
+     */
     int (*read)(tcp_stream_handle_t s, void *buffer, int bufsz);
+    
+    /**
+     * @brief Write a data block to the TCP stream
+     * @param [in] s		The TCP stream handle
+     * @param [in] buffer	The buffer in which the data will be written
+     * @param [in] bufsz	The buffer size
+     * @return The number of bytes written, -1 on error
+     */
     int (*write)(tcp_stream_handle_t s, const void *buffer, int bufsz); 
 };
 
+/**
+ * @brief Create a TCP stream
+ * @return TCP stream handle on success, NULL otherwise
+ */
 tcp_stream_handle_t tcp_stream_create(void);
-void tcp_stream_destroy(tcp_stream_handle_t);
-void tcp_stream_set_timeout(tcp_stream_handle_t, struct timeval *timeout);
+
+/**
+ * @brief Destroy a TCP stream
+ * @param [in] s The TCP stream handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
+esp_err_t tcp_stream_destroy(tcp_stream_handle_t s);
+
+/**
+ * @brief Set a timeout for the TCP I/O
+ * @param [in] s 		The TCP stream handle
+ * @param [in] timeout 	The timeout structure
+ */
+void tcp_stream_set_timeout(tcp_stream_handle_t s, struct timeval *timeout);
 
 #ifdef __cplusplus
 }

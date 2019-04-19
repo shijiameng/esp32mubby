@@ -32,14 +32,60 @@
 extern "C" {
 #endif
 
+#define PLAYER_STATE_STARTED	(0)
+#define PLAYER_STATE_FINISHED	(1)
+#define PLAYER_STATE_ABORTED	(2)
+#define PLAYER_STATE_ERROR		(3)
+
 typedef struct audio_player *audio_player_handle_t;
 
+
+/**
+ * @brief Create a player
+ * @return player handle on success, NULL otherwise
+ */
 audio_player_handle_t player_create(void);
+
+
+/**
+ * @brief Destroy a player
+ * @param [in] ap The player handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_destroy(audio_player_handle_t ap);
+
+
+/**
+ * @brief Start playing a MP3 stream
+ * @param [in] ap The player handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_start(audio_player_handle_t ap);
+
+
+/**
+ * @brief Stop playing a MP3 stream
+ * @param [in] ap The player handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_stop(audio_player_handle_t ap);
+
+
+/**
+ * @brief Set an event listener
+ * @param [in] ap 	The player handle
+ * @param [in] evt 	The event listener handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_set_event_listener(audio_player_handle_t ap, audio_event_iface_handle_t evt);
-audio_event_iface_handle_t player_get_event_iface(audio_player_handle_t ap);
+
+
+/**
+ * @brief Set a data stream for the player
+ * @param [in] ap		The player handle
+ * @param [in] stream	The TCP stream handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_set_tcp_stream(audio_player_handle_t ap, tcp_stream_handle_t stream);
 
 #ifdef __cplusplus

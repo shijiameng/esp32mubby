@@ -44,13 +44,6 @@
 #define RECORDER_TASK_SIZE			4096
 #define RECORDER_TASK_PRIORITY		5
 
-#define RECORDER_BUFSIZE 			8192
-
-#define RECORDER_IDLE_BIT			BIT0
-#define RECORDER_PROCESSING_BIT		BIT2
-#define RECORDER_START_BIT			BIT3
-#define RECORDER_STOP_BIT			BIT4
-
 static const char *TAG = "RECORDER";
 
 struct audio_recorder {
@@ -62,9 +55,6 @@ struct audio_recorder {
 	tcp_stream_handle_t				stream;
 	bool							is_running;
 };
-
-extern int g_server_sockfd;
-extern audio_board_handle_t g_board_handle;
 
 static int recorder_write_cb(audio_element_handle_t el, char *buf, int len, TickType_t wait_time, void *ctx)
 {
@@ -95,8 +85,9 @@ static void recorder_task(void *pvParameters)
 	audio_element_run(ar->i2s_stream_reader);
 	audio_element_resume(ar->i2s_stream_reader, 0, 0);
 	
-	ar->is_running = true;
+	/* notify the main task recorder is starting now */
 	recorder_notify_sync(ar, RECORDER_STATE_STARTED);
+	ar->is_running = true;
 	
 	for (;;) {
 		audio_event_iface_msg_t msg = {0};
@@ -107,6 +98,7 @@ static void recorder_task(void *pvParameters)
 			continue;
 		}
 		
+		/* recorder received the stop instruction from the external */
 		if (msg.source_type == MUBBY_ID_CORE) {
 			if (!strncmp((char *)msg.data, "stop", 4)) {
 				ESP_LOGW(TAG, "[ * ] Interrupted externally");
@@ -126,6 +118,10 @@ static void recorder_task(void *pvParameters)
 	vTaskDelete(NULL);
 }
 
+/**
+ * @brief Create a recorder
+ * @return recorder handle on success, NULL otherwise
+ */
 audio_recorder_handle_t recorder_create(void)
 {
 	audio_recorder_handle_t ar;
@@ -135,13 +131,14 @@ audio_recorder_handle_t recorder_create(void)
 		return NULL;
 	}
 	
+	/* Create the external and internal event interface */
 	audio_event_iface_cfg_t cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
 	ar->external_event = audio_event_iface_init(&cfg);
 	mem_assert(ar->external_event);
-	
 	ar->internal_event = audio_event_iface_init(&cfg);
 	mem_assert(ar->internal_event);
-		
+	
+	/* Create the I2S reader stream */
 	i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
 	i2s_cfg.i2s_config.sample_rate = 8000;
 	i2s_cfg.type = AUDIO_STREAM_READER;
@@ -153,11 +150,21 @@ audio_recorder_handle_t recorder_create(void)
 	return ar;
 }
 
+/**
+ * @brief Destroy a recorder
+ * @param [in] ar The recorder handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t recorder_destroy(audio_recorder_handle_t ar)
 {	
 	return ESP_OK;
 }
 
+/**
+ * @brief Start the recorder
+ * @param [in] ar The recorder handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t recorder_start(audio_recorder_handle_t ar)
 {
 	if (xTaskCreate(recorder_task, "recorder_task", RECORDER_TASK_SIZE, (void *)ar, RECORDER_TASK_PRIORITY, &ar->task) != pdPASS) {
@@ -168,6 +175,11 @@ esp_err_t recorder_start(audio_recorder_handle_t ar)
 	return ESP_OK;
 }
 
+/**
+ * @brief Stop the recorder
+ * @param [in] ar The recorder handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t recorder_stop(audio_recorder_handle_t ar)
 {
 	if (ar->is_running) {
@@ -182,16 +194,22 @@ esp_err_t recorder_stop(audio_recorder_handle_t ar)
 	return ESP_OK;
 }
 
+/**
+ * @brief Set an event listener
+ * @param [in] ar 	The recorder handle
+ * @param [in] evt 	The event listener handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t recorder_set_event_listener(audio_recorder_handle_t ar, audio_event_iface_handle_t evt)
 {
 	return audio_event_iface_set_listener(ar->external_event, evt);
 }
 
-audio_event_iface_handle_t recorder_get_event_iface(audio_recorder_handle_t ar)
-{
-	return ar->external_event;
-}
-
+/**
+ * @brief Set a data stream for the recorder
+ * @param [in] ar		The recorder handle
+ * @param [in] stream	The TCP stream
+ */
 esp_err_t recorder_set_tcp_stream(audio_recorder_handle_t ar, tcp_stream_handle_t stream)
 {
 	ar->stream = stream;

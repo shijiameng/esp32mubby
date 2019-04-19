@@ -43,21 +43,11 @@
 
 #include "mubby.h"
 #include "player.h"
- 
-static const char *TAG = "PLAYER";
 
 #define PLAYER_TASK_SIZE		4096
 #define PLAYER_TASK_PRIORITY	5
 
-#define PLAYER_BUFSIZE 			8192
-
-#define PLAYER_IDLE_BIT			BIT0
-#define PLAYER_PROCESSING_BIT	BIT2
-#define PLAYER_START_BIT		BIT3
-#define PLAYER_STOP_BIT			BIT4
-
-extern int g_server_sockfd;
-extern audio_board_handle_t g_board_handle;
+static const char *TAG = "PLAYER";
 
 struct audio_player {
 	TaskHandle_t					task;
@@ -103,6 +93,7 @@ static void player_task(void *pvParameters)
 	audio_pipeline_set_listener(ap->pipeline, evt);
 	audio_pipeline_run(ap->pipeline);
 	
+	/* notify the main task player is starting now */
 	player_notify_sync(ap, PLAYER_STATE_STARTED);
 	ap->is_running = true;
 	
@@ -130,14 +121,15 @@ static void player_task(void *pvParameters)
 			continue;
 		}
 		
+		/* data stream reached EOF, stopping */ 
 		if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *)ap->i2s_stream_writer
 			&& msg.cmd == AEL_MSG_CMD_REPORT_STATUS && (int) msg.data == AEL_STATUS_STATE_STOPPED) {
 			ESP_LOGW(TAG, "[ * ] Stop event received");
 			break;
 		}
         
+        /* player received stop instruction from external */
 		if (msg.source_type == MUBBY_ID_CORE) {
-			printf("stopping...\n");
 			if (!strncmp((char *)msg.data, "stop", 4)) {
 				ESP_LOGW(TAG, "[ * ] Interrupted externally");
 				break;
@@ -157,6 +149,10 @@ static void player_task(void *pvParameters)
 	vTaskDelete(NULL);
 }
 
+/**
+ * @brief Create a player
+ * @return player handle on success, NULL otherwise
+ */
 audio_player_handle_t player_create(void)
 {
 	audio_player_handle_t ap;
@@ -165,22 +161,28 @@ audio_player_handle_t player_create(void)
 		return NULL;
 	}
 	
+	/* Create the external and internal event interface */
 	audio_event_iface_cfg_t cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
 	ap->external_event = audio_event_iface_init(&cfg);
 	mem_assert(ap->external_event);
-	
 	ap->internal_event = audio_event_iface_init(&cfg);
 	mem_assert(ap->internal_event);
 	
+	/* Create the I2S writer stream */
 	i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
 	i2s_cfg.type = AUDIO_STREAM_WRITER;
 	ap->i2s_stream_writer = i2s_stream_init(&i2s_cfg);
 	mem_assert(ap->i2s_stream_writer);
 	
+	/* Create the MP3 decoder */
 	mp3_decoder_cfg_t mp3_cfg = DEFAULT_MP3_DECODER_CONFIG();
 	ap->mp3_decoder = mp3_decoder_init(&mp3_cfg);
 	mem_assert(ap->mp3_decoder);
 	
+	/*
+	 * Create the pipeline and connect the MP3 decoder and I2S writer stream
+	 * Pipeline structure: TCP stream --> MP3 decoder --> I2S writer 
+	 */
 	audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
 	ap->pipeline = audio_pipeline_init(&pipeline_cfg);
 	mem_assert(ap->pipeline);
@@ -194,11 +196,21 @@ audio_player_handle_t player_create(void)
 	return ap;
 }
 
+/**
+ * @brief Destroy a player
+ * @param [in] ap The player handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_destroy(audio_player_handle_t ap)
 {
 	return ESP_OK;
 }
 
+/**
+ * @brief Start playing a MP3 stream
+ * @param [in] ap The player handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_start(audio_player_handle_t ap)
 {
 	if (xTaskCreate(player_task, "player_task", PLAYER_TASK_SIZE, (void *)ap, PLAYER_TASK_PRIORITY, &ap->task) != pdPASS) {
@@ -209,6 +221,11 @@ esp_err_t player_start(audio_player_handle_t ap)
 	return ESP_OK;
 }
 
+/**
+ * @brief Stop playing a MP3 stream
+ * @param [in] ap The player handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_stop(audio_player_handle_t ap)
 {
 	if (ap->is_running) {
@@ -223,16 +240,23 @@ esp_err_t player_stop(audio_player_handle_t ap)
 	return ESP_OK;
 }
 
+/**
+ * @brief Set an event listener
+ * @param [in] ap 	The player handle
+ * @param [in] evt 	The event listener handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_set_event_listener(audio_player_handle_t ap, audio_event_iface_handle_t evt)
 {
 	return audio_event_iface_set_listener(ap->external_event, evt);
 }
 
-audio_event_iface_handle_t player_get_event_iface(audio_player_handle_t ap)
-{
-	return ap->external_event;
-}
-
+/**
+ * @brief Set a data stream source for the player
+ * @param [in] ap		The player handle
+ * @param [in] stream	The TCP stream handle
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
 esp_err_t player_set_tcp_stream(audio_player_handle_t ap, tcp_stream_handle_t stream)
 {
 	ap->stream = stream;

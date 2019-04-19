@@ -32,26 +32,10 @@
 extern "C" {
 #endif
 
-#define MUBBY_ID_CORE		(0)
-
-#define MUBBY_ID_PLAYER		(1)
-
-#define PLAYER_STATE_STARTED	(0)
-#define PLAYER_STATE_FINISHED	(1)
-#define PLAYER_STATE_ABORTED	(2)
-#define PLAYER_STATE_ERROR		(3)
-
+#define MUBBY_ID_CORE			(0)
+#define MUBBY_ID_PLAYER			(1)
 #define MUBBY_ID_RECORDER		(2)
-
-#define RECORDER_STATE_STARTED	(0)
-#define RECORDER_STATE_FINISHED (1)
-#define RECORDER_STATE_ABORTED	(2)
-#define RECORDER_STATE_ERROR	(3)
-
 #define MUBBY_ID_WIFIMGR		(3)
-
-#define WIFI_MANAGER_STATE_CONNECTED  	(0)
-#define WIFI_MANAGER_STATE_DISCONNECTED (1)
 
 typedef enum {
 	MUBBY_STATE_RESET = -1,

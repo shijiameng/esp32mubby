@@ -40,7 +40,8 @@ Contains the freeRTOS task and all necessary support
 extern "C" {
 #endif
 
-
+#define WIFI_MANAGER_STATE_CONNECTED  	(0)
+#define WIFI_MANAGER_STATE_DISCONNECTED (1)
 
 /**
  * @brief Defines the maximum size of a SSID name. 32 is IEEE standard.
