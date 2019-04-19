@@ -411,6 +411,10 @@ void app_main(void)
         err = nvs_flash_init();
     }
     
+    ESP_LOGI(TAG, "[APP] Startup...");
+    ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
+    
     g_board_handle = audio_board_init();
     audio_hal_ctrl_codec(g_board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
     audio_hal_get_volume(g_board_handle->audio_hal, &s_player_volume);
@@ -465,10 +469,6 @@ void app_main(void)
 	
 	xReturned = xTaskCreate(core_task, "core_task", 2048, (void *)app_ctx, tskIDLE_PRIORITY, NULL);
 	configASSERT(xReturned == pdPASS);
-	
-	ESP_LOGI(TAG, "[APP] Startup...");
-    ESP_LOGI(TAG, "[APP] Free memory: %d bytes", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "[APP] IDF version: %s", esp_get_idf_version());
 	
 	push_state(app_ctx, MUBBY_STATE_STANDBY);
 }
