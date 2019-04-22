@@ -32,32 +32,115 @@
 extern "C" {
 #endif
 
+/**
+ * Indicates an event is from the main task
+ */
 #define MUBBY_ID_CORE			(0)
+
+/**
+ * Indicates an event is from the player task
+ */
 #define MUBBY_ID_PLAYER			(1)
+
+/**
+ * Indicates an event is from the recorder task
+ */
 #define MUBBY_ID_RECORDER		(2)
+
+/**
+ * Indicates an event is from the wifi manager
+ */
 #define MUBBY_ID_WIFIMGR		(3)
 
+
+/**
+ * @brief Incidates application is in which state
+ */
 typedef enum {
+	/**
+	 * Error occurred. Mubby is reseting
+	 */
 	MUBBY_STATE_RESET = -1,
+	
+	/**
+	 * Mubby is idle.
+	 */
 	MUBBY_STATE_STANDBY = 0,
+	
+	/**
+	 * Mubby is connecting to server
+	 */
 	MUBBY_STATE_CONNECTING,
+	
+	/**
+	 * Mubby is recording
+	 */
 	MUBBY_STATE_RECORDING,
-	MUBBY_STATE_STOP_RECORDING,
+	
+	/**
+	 * Recording finished
+	 */
 	MUBBY_STATE_RECORDING_FINISHED,
+	
+	/**
+	 * Mubby is playing back
+	 */
 	MUBBY_STATE_PLAYING,
+	
+	/**
+	 * Playing finished
+	 */
 	MUBBY_STATE_PLAYING_FINISHED,
+	
+	/**
+	 * Shutdown
+	 */
 	MUBBY_STATE_SHUTDOWN
 } mubby_state_t;
 
 
+/**
+ * @brief Application context
+ */
 struct app_context {
+	/**
+	 * Player handle
+	 */
 	audio_player_handle_t 		ap;
+	
+	/**
+	 * Recorder handle
+	 */
 	audio_recorder_handle_t 	ar;
+	
+	/**
+	 * Event listener
+	 */
 	audio_event_iface_handle_t 	evt;
+	
+	/**
+	 * TCP stream handler
+	 */
 	tcp_stream_handle_t			stream;
+	
+	/**
+	 * Device MAC address
+	 */
 	uint8_t						macaddr[6];
+	
+	/**
+	 * Message queue
+	 */
 	QueueHandle_t 				msg_queue;
+	
+	/**
+	 * Current state
+	 */
 	mubby_state_t 				cur_state;
+	
+	/**
+	 * Continue chatting or not
+	 */
 	bool						cnt_chat;
 };
 
