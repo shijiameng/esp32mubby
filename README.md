@@ -16,7 +16,7 @@ MUBBY firmware for Espressif ESP32 platform
 sudo apt-get install git wget make libncurses-dev flex bison gperf python python-pip python-setuptools python-serial
 ```
 
-#### * Toolchain 설치
+#### - Toolchain 설치
 
 ```bash
 wget https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-73-ge28a011-5.2.0.tar.gz
@@ -25,20 +25,20 @@ echo PATH=/opt/xtensa-esp32-elf/bin:$PATH >> ~/.bashrc
 source ~/.bashrc
 ```
  
-#### * ESP-ADF 설치
+#### - ESP-ADF 설치
 
 ```bash
 git clone --recursive https://github.com/espressif/esp-adf.git
 ```
 
-#### * ESP-ADF의 경로를 PATH 환경 변수에 추가
+#### - ESP-ADF의 경로를 PATH 환경 변수에 추가
 
 ```bash
 echo ADF_PATH=/path/to/esp-adf >> ~/.bashrc
 source ~/.bashrc
 ```
 
-#### * MQTT 라이브러리 추가
+#### - MQTT 라이브러리 추가
 
 ```bash
 cd $ADF_PATH/esp-idf
