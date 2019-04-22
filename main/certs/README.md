@@ -4,11 +4,9 @@
 
 | 파일명 |  설명  |
 |-------|:-------:|
-| cacert.pem | Certificate Authority (CA) 인증서 |
-|------------|:----------------------------------:|
-| cert.pem   | CA 서명된 크라이언트 인증서           |
-|------------|:----------------------------------:|
-| privkey.pem | 크라이언트 개인 키 |
+| cacert.pem  | Certificate Authority (CA) 인증서 |
+| cert.pem    | CA 서명된 크라이언트 인증서           |
+| privkey.pem | 크라이언트 개인 키                   |
 
 
 
