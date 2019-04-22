@@ -21,7 +21,7 @@ sudo apt-get install git wget make libncurses-dev flex bison gperf python python
 ```bash
 wget https://dl.espressif.com/dl/xtensa-esp32-elf-linux64-1.22.0-73-ge28a011-5.2.0.tar.gz
 sudo tar xzvf xtensa-esp32-elf-linux64-1.22.0-73-ge28a011-5.2.0.tar.gz -C /opt
-echo PATH=/opt/xtensa-esp32-elf/bin:$PATH >> ~/.bashrc
+echo "export PATH=/opt/xtensa-esp32-elf/bin:$PATH" >> ~/.bashrc
 source ~/.bashrc
 ```
  
@@ -34,7 +34,7 @@ git clone --recursive https://github.com/espressif/esp-adf.git
 ### ESP-ADF의 경로를 PATH 환경 변수에 추가
 
 ```bash
-echo ADF_PATH=/path/to/esp-adf >> ~/.bashrc
+echo "export ADF_PATH=/path/to/esp-adf" >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -50,15 +50,15 @@ git submodule add https://github.com/tuanpmt/espmqtt.git components/espmqtt
 ### 무삐 프로젝트 clone
 
 ```bash
-git clone https://github.com/shijiameng/mubby.git
+git clone https://github.com/shijiameng/esp32mubby.git
 ```
 
 ### 클라이언트 인증서 및 키 발급
 
 #### Private Key 및 인증서 청구 파일 생성
 ```bash
-cd mubby/main/certs
-sh cert_gen.sh
+cd esp32mubby/main/certs
+sh cert_req.sh
 ```
 
 #### Certificate Authority (CA)에게서 사인 받기
@@ -68,14 +68,9 @@ sh cert_gen.sh
 ### 무삐 빌드
 
 ```bash
-cd mubby
+cd esp32mubby
 make
 ```
-
-  
-
-
-
 
 
 
