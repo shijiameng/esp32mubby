@@ -55,21 +55,13 @@ git clone https://github.com/shijiameng/esp32mubby.git
 
 ### 클라이언트 인증서 및 키 발급
 
-#### Private Key 및 인증서 청구 파일 생성
-```bash
-cd esp32mubby/main/certs
-sh cert_req.sh
-```
-
-#### Certificate Authority (CA)에게서 사인 받기
-
-위 절차에 생성된 인증서 청구 파일 client.req를 무삐 서버 관리자에게 보내며 클라이언트 인증서 파일cert.pem 및 CA인증서 파일 cacert.pem 청구하시오. cert.pem 및 cacert.pem을 디렉터리 mubby/main/certs에 넣으시오.
+인증서 발급 청구 [[details]](main/certs/README.md)
 
 ### 무삐 빌드
 
 ```bash
 cd esp32mubby
-make
+make flash monitor
 ```
 
 
