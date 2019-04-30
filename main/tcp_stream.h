@@ -91,10 +91,10 @@ esp_err_t tcp_stream_destroy(tcp_stream_handle_t s);
 
 /**
  * @brief Set a timeout for the TCP I/O
- * @param [in] s 		The TCP stream handle
- * @param [in] timeout 	The timeout structure
+ * @param [in] s 	The TCP stream handle
+ * @param [in] ms 	The timeout in milliseconds
  */
-void tcp_stream_set_timeout(tcp_stream_handle_t s, struct timeval *timeout);
+void tcp_stream_set_timeout(tcp_stream_handle_t s, unsigned int ms);
 
 #ifdef __cplusplus
 }

@@ -229,7 +229,6 @@ static bool mubby_auth(app_context_handle_t app_ctx)
 {
 	tcp_stream_handle_t stream = app_ctx->stream;
 	char macbuf[18] = {0};
-	char resp[8] = {0};
 	
 	snprintf(macbuf, sizeof(macbuf), "%02x:%02x:%02x:%02x:%02x:%02x",
 		app_ctx->macaddr[0], app_ctx->macaddr[1], app_ctx->macaddr[2], 
@@ -240,6 +239,8 @@ static bool mubby_auth(app_context_handle_t app_ctx)
 		return false;
 	}
 	
+#if 0
+	char resp[8] = {0};
 	if (stream->read(stream, resp, sizeof(resp)) < 0) {
 		ESP_LOGE(TAG, "failed to get response from server");
 		return false;
@@ -248,8 +249,11 @@ static bool mubby_auth(app_context_handle_t app_ctx)
 	if (!strncmp(resp, "accept", sizeof(resp))) {
 		return true;
 	}
+	
+	return false
+#endif
 
-	return false;	
+	return true;	
 }
 
 static void event_monitor_task(void *pvParameters)
@@ -356,8 +360,7 @@ static void core_task(void *pvParameters)
 				push_state(ctx, MUBBY_STATE_RESET);
 				continue;
 			} else {
-				struct timeval timeout = {2, 0};
-				tcp_stream_set_timeout(ctx->stream, &timeout);
+				tcp_stream_set_timeout(ctx->stream, CONFIG_TCP_TIMEOUT);
 				if (!mubby_auth(ctx)) {
 					push_state(ctx, MUBBY_STATE_RESET);
 					continue;

@@ -292,13 +292,17 @@ esp_err_t tcp_stream_destroy(tcp_stream_handle_t s)
 
 /**
  * @brief Set a timeout for the TCP I/O
- * @param [in] s 		The TCP stream handle
- * @param [in] timeout 	The timeout structure
+ * @param [in] s 	The TCP stream handle
+ * @param [in] ms 	The timeout in milliseconds
  */
-void tcp_stream_set_timeout(tcp_stream_handle_t s, struct timeval *timeout)
+void tcp_stream_set_timeout(tcp_stream_handle_t s, unsigned int ms)
 {
-#ifndef CONFIG_ENABLE_SECURITY_PROTO
 	tcp_stream_context_handle_t ctx = s->context;
-	setsockopt(ctx->sock, SOL_SOCKET, SO_RCVTIMEO, timeout, sizeof(struct timeval));
+#ifndef CONFIG_ENABLE_SECURITY_PROTO
+	struct timeval timeout = {ms / 1000, (ms % 1000) * 1000};
+	setsockopt(ctx->sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
+#else
+	mbedtls_ssl_conf_read_timeout(&ctx->conf, (uint32_t)ms);
+	mbedtls_ssl_set_bio(&ctx->ssl, &ctx->server_fd, mbedtls_net_send, NULL, mbedtls_net_recv_timeout);
 #endif
 }
