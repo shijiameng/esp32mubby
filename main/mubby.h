@@ -147,12 +147,14 @@ struct app_context {
 typedef struct app_context *app_context_handle_t;
 typedef struct app_context app_context_t;
 
+#ifdef CONFIG_ENABLE_SECURITY_PROTO
 extern unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");
 extern unsigned char cacert_pem_end[] asm("_binary_cacert_pem_end");
 extern unsigned char cert_pem_start[] asm("_binary_cert_pem_start");
 extern unsigned char cert_pem_end[] asm("_binary_cert_pem_end");
 extern unsigned char privkey_pem_start[] asm("_binary_privkey_pem_start");
 extern unsigned char privkey_pem_end[] asm("_binary_privkey_pem_end");
+#endif
 
 #ifdef __cplusplus
 }
