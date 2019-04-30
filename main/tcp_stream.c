@@ -178,7 +178,6 @@ tcp_stream_handle_t tcp_stream_create(void)
 {
 	tcp_stream_handle_t s;
 	tcp_stream_context_handle_t ctx;
-	int ret;
 	
 	s = calloc(1, sizeof(struct tcp_stream));
 	if (!s) {
@@ -192,6 +191,8 @@ tcp_stream_handle_t tcp_stream_create(void)
 	}
 
 #ifdef CONFIG_ENABLE_SECURITY_PROTO
+	int ret;
+	
 	mbedtls_ssl_init(&ctx->ssl);
     mbedtls_x509_crt_init(&ctx->cacert);
     mbedtls_x509_crt_init(&ctx->clntcert);
