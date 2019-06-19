@@ -52,6 +52,8 @@ extern "C" {
  */
 #define MUBBY_ID_WIFIMGR		(3)
 
+#define MUBBY_ID_VAD			(4)
+
 
 /**
  * @brief Incidates application is in which state
